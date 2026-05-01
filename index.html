@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Chatbot Widget</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <button id="chatToggle" class="toggle-button" aria-label="Open chat">Chat</button>
+
+  <section id="chatWidget" class="chat-widget hidden" aria-label="Chat widget">
+    <header class="chat-header">
+      <h1>Chat</h1>
+      <button id="chatClose" class="close-button" aria-label="Close chat">X</button>
+    </header>
+
+    <main id="chatMessages" class="chat-messages" aria-live="polite" aria-label="Messages"></main>
+
+    <form id="chatForm" class="chat-input-area">
+      <input
+        id="chatInput"
+        type="text"
+        placeholder="Type a message..."
+        autocomplete="off"
+        aria-label="Message input"
+      >
+      <button type="submit" id="sendButton">Send</button>
+    </form>
+  </section>
+
+  <script src="script.js"></script>
+</body>
+</html>
