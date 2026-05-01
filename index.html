@@ -18,13 +18,12 @@
     <main id="chatMessages" class="chat-messages" aria-live="polite" aria-label="Messages"></main>
 
     <form id="chatForm" class="chat-input-area">
-      <input
+      <textarea
         id="chatInput"
-        type="text"
         placeholder="Type a message..."
-        autocomplete="off"
         aria-label="Message input"
-      >
+        rows="1"
+      ></textarea>
       <button type="submit" id="sendButton">Send</button>
     </form>
   </section>
