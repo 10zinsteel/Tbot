@@ -15,7 +15,7 @@ const client = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.2";
-const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
 const googleOAuthClient =
   process.env.GOOGLE_CLIENT_ID &&
   process.env.GOOGLE_CLIENT_SECRET &&
@@ -44,6 +44,49 @@ function trimConversationHistory() {
     conversationHistory.splice(1, removeCount);
     console.log(`[memory] trimmed ${removeCount} old message(s)`);
   }
+}
+
+function getCalendarClient() {
+  if (!googleOAuthClient || !googleTokens) {
+    return null;
+  }
+
+  googleOAuthClient.setCredentials(googleTokens);
+  return google.calendar({ version: "v3", auth: googleOAuthClient });
+}
+
+function ensureGoogleCalendarConnected(req, res, next) {
+  if (!googleOAuthClient || !googleTokens) {
+    return res
+      .status(401)
+      .json({ error: "Google Calendar is not connected" });
+  }
+
+  next();
+}
+
+function normalizeEventResponse(event) {
+  return {
+    eventId: event.id || null,
+    title: event.summary || "",
+    start: event.start?.dateTime || event.start?.date || null,
+    end: event.end?.dateTime || event.end?.date || null,
+    location: event.location || "",
+    description: event.description || "",
+    htmlLink: event.htmlLink || null,
+  };
+}
+
+function extractCalendarEventUpdate(body) {
+  const update = {};
+
+  if (body.title !== undefined) update.summary = body.title;
+  if (body.location !== undefined) update.location = body.location;
+  if (body.description !== undefined) update.description = body.description;
+  if (body.start !== undefined) update.start = { dateTime: body.start };
+  if (body.end !== undefined) update.end = { dateTime: body.end };
+
+  return update;
 }
 
 // Serve the TBot UI (HTML, CSS, JS) from the project root so /api/chat stays same-origin
@@ -98,6 +141,339 @@ app.post("/api/reset", (req, res) => {
   console.log("[memory] conversation reset to system message");
   res.json({ success: true });
 });
+
+app.get("/api/calendar/events", ensureGoogleCalendarConnected, async (req, res) => {
+  try {
+    const calendar = getCalendarClient();
+    if (!calendar) {
+      return res
+        .status(401)
+        .json({ error: "Google Calendar is not connected" });
+    }
+
+    const response = await calendar.events.list({
+      calendarId: "primary",
+      maxResults: 10,
+      singleEvents: true,
+      orderBy: "startTime",
+      timeMin: new Date().toISOString(),
+    });
+
+    const events = (response.data.items || []).map(normalizeEventResponse);
+    res.json({ events });
+  } catch (error) {
+    console.error("[calendar] Failed to fetch events:", error);
+    res.status(500).json({ error: "Failed to fetch calendar events" });
+  }
+});
+
+app.post("/api/calendar/events", ensureGoogleCalendarConnected, async (req, res) => {
+  try {
+    const { title, start, end, location, description } = req.body;
+    if (!title || !start || !end) {
+      return res
+        .status(400)
+        .json({ error: "title, start, and end are required" });
+    }
+
+    const calendar = getCalendarClient();
+    if (!calendar) {
+      return res
+        .status(401)
+        .json({ error: "Google Calendar is not connected" });
+    }
+
+    const response = await calendar.events.insert({
+      calendarId: "primary",
+      requestBody: {
+        summary: title,
+        start: { dateTime: start },
+        end: { dateTime: end },
+        location,
+        description,
+      },
+    });
+
+    res.status(201).json({ event: normalizeEventResponse(response.data) });
+  } catch (error) {
+    console.error("[calendar] Failed to create event:", error);
+    res.status(500).json({ error: "Failed to create calendar event" });
+  }
+});
+
+app.patch(
+  "/api/calendar/events/:eventId",
+  ensureGoogleCalendarConnected,
+  async (req, res) => {
+    try {
+      const { eventId } = req.params;
+      if (!eventId) {
+        return res.status(400).json({ error: "eventId is required" });
+      }
+
+      const update = extractCalendarEventUpdate(req.body);
+      if (Object.keys(update).length === 0) {
+        return res.status(400).json({
+          error:
+            "At least one of title, start, end, location, description is required",
+        });
+      }
+
+      const calendar = getCalendarClient();
+      if (!calendar) {
+        return res
+          .status(401)
+          .json({ error: "Google Calendar is not connected" });
+      }
+
+      const response = await calendar.events.patch({
+        calendarId: "primary",
+        eventId,
+        requestBody: update,
+      });
+
+      res.json({ event: normalizeEventResponse(response.data) });
+    } catch (error) {
+      console.error("[calendar] Failed to update event:", error);
+      if (error?.code === 404) {
+        return res.status(404).json({ error: "Calendar event not found" });
+      }
+      res.status(500).json({ error: "Failed to update calendar event" });
+    }
+  }
+);
+
+app.patch(
+  "/api/calendar/events/:eventId/move",
+  ensureGoogleCalendarConnected,
+  async (req, res) => {
+    try {
+      const { eventId } = req.params;
+      const { start, end } = req.body;
+      if (!eventId) {
+        return res.status(400).json({ error: "eventId is required" });
+      }
+      if (!start || !end) {
+        return res.status(400).json({ error: "start and end are required" });
+      }
+
+      const calendar = getCalendarClient();
+      if (!calendar) {
+        return res
+          .status(401)
+          .json({ error: "Google Calendar is not connected" });
+      }
+
+      const response = await calendar.events.patch({
+        calendarId: "primary",
+        eventId,
+        requestBody: {
+          start: { dateTime: start },
+          end: { dateTime: end },
+        },
+      });
+
+      res.json({ event: normalizeEventResponse(response.data) });
+    } catch (error) {
+      console.error("[calendar] Failed to move event:", error);
+      if (error?.code === 404) {
+        return res.status(404).json({ error: "Calendar event not found" });
+      }
+      res.status(500).json({ error: "Failed to reschedule calendar event" });
+    }
+  }
+);
+
+app.delete(
+  "/api/calendar/events/:eventId",
+  ensureGoogleCalendarConnected,
+  async (req, res) => {
+    try {
+      const { eventId } = req.params;
+      if (!eventId) {
+        return res.status(400).json({ error: "eventId is required" });
+      }
+
+      const calendar = getCalendarClient();
+      if (!calendar) {
+        return res
+          .status(401)
+          .json({ error: "Google Calendar is not connected" });
+      }
+
+      await calendar.events.delete({
+        calendarId: "primary",
+        eventId,
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[calendar] Failed to delete event:", error);
+      if (error?.code === 404) {
+        return res.status(404).json({ error: "Calendar event not found" });
+      }
+      res.status(500).json({ error: "Failed to delete calendar event" });
+    }
+  }
+);
+
+app.get(
+  "/api/calendar/calendars",
+  ensureGoogleCalendarConnected,
+  async (req, res) => {
+    try {
+      const calendar = getCalendarClient();
+      if (!calendar) {
+        return res
+          .status(401)
+          .json({ error: "Google Calendar is not connected" });
+      }
+
+      const response = await calendar.calendarList.list();
+      const calendars = (response.data.items || []).map((item) => ({
+        calendarId: item.id || null,
+        summary: item.summary || "",
+        description: item.description || "",
+        timeZone: item.timeZone || "",
+        accessRole: item.accessRole || "",
+        primary: !!item.primary,
+      }));
+
+      res.json({ calendars });
+    } catch (error) {
+      console.error("[calendar] Failed to list calendars:", error);
+      res.status(500).json({ error: "Failed to list calendars" });
+    }
+  }
+);
+
+app.post(
+  "/api/calendar/calendars",
+  ensureGoogleCalendarConnected,
+  async (req, res) => {
+    try {
+      const { summary, description, timeZone } = req.body;
+      if (!summary) {
+        return res.status(400).json({ error: "summary is required" });
+      }
+
+      const calendar = getCalendarClient();
+      if (!calendar) {
+        return res
+          .status(401)
+          .json({ error: "Google Calendar is not connected" });
+      }
+
+      const response = await calendar.calendars.insert({
+        requestBody: {
+          summary,
+          description,
+          timeZone,
+        },
+      });
+
+      res.status(201).json({
+        calendar: {
+          calendarId: response.data.id || null,
+          summary: response.data.summary || "",
+          description: response.data.description || "",
+          timeZone: response.data.timeZone || "",
+        },
+      });
+    } catch (error) {
+      console.error("[calendar] Failed to create calendar:", error);
+      res.status(500).json({ error: "Failed to create calendar" });
+    }
+  }
+);
+
+app.patch(
+  "/api/calendar/calendars/:calendarId",
+  ensureGoogleCalendarConnected,
+  async (req, res) => {
+    try {
+      const { calendarId } = req.params;
+      const { summary, description, timeZone } = req.body;
+      if (!calendarId) {
+        return res.status(400).json({ error: "calendarId is required" });
+      }
+
+      const updates = {};
+      if (summary !== undefined) updates.summary = summary;
+      if (description !== undefined) updates.description = description;
+      if (timeZone !== undefined) updates.timeZone = timeZone;
+
+      if (Object.keys(updates).length === 0) {
+        return res
+          .status(400)
+          .json({ error: "At least one of summary, description, timeZone is required" });
+      }
+
+      const calendar = getCalendarClient();
+      if (!calendar) {
+        return res
+          .status(401)
+          .json({ error: "Google Calendar is not connected" });
+      }
+
+      const response = await calendar.calendars.patch({
+        calendarId,
+        requestBody: updates,
+      });
+
+      res.json({
+        calendar: {
+          calendarId: response.data.id || null,
+          summary: response.data.summary || "",
+          description: response.data.description || "",
+          timeZone: response.data.timeZone || "",
+        },
+      });
+    } catch (error) {
+      console.error("[calendar] Failed to update calendar:", error);
+      if (error?.code === 404) {
+        return res.status(404).json({ error: "Calendar not found" });
+      }
+      res.status(500).json({ error: "Failed to update calendar" });
+    }
+  }
+);
+
+app.delete(
+  "/api/calendar/calendars/:calendarId",
+  ensureGoogleCalendarConnected,
+  async (req, res) => {
+    try {
+      const { calendarId } = req.params;
+      if (!calendarId) {
+        return res.status(400).json({ error: "calendarId is required" });
+      }
+
+      const calendar = getCalendarClient();
+      if (!calendar) {
+        return res
+          .status(401)
+          .json({ error: "Google Calendar is not connected" });
+      }
+
+      const meta = await calendar.calendars.get({ calendarId });
+      if (meta.data?.primary) {
+        return res
+          .status(400)
+          .json({ error: "Primary calendar cannot be deleted" });
+      }
+
+      await calendar.calendars.delete({ calendarId });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[calendar] Failed to delete calendar:", error);
+      if (error?.code === 404) {
+        return res.status(404).json({ error: "Calendar not found" });
+      }
+      res.status(500).json({ error: "Failed to delete calendar" });
+    }
+  }
+);
 
 app.post("/api/chat", async (req, res) => {
   try {
