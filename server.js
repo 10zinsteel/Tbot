@@ -35,6 +35,13 @@ function trimConversationHistory() {
 // Serve the TBot UI (HTML, CSS, JS) from the project root so /api/chat stays same-origin
 app.use(express.static(__dirname));
 
+app.post("/api/reset", (req, res) => {
+  conversationHistory.length = 0;
+  conversationHistory.push({ ...SYSTEM_MESSAGE });
+  console.log("[memory] conversation reset to system message");
+  res.json({ success: true });
+});
+
 app.post("/api/chat", async (req, res) => {
   try {
     const { message } = req.body;

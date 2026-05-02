@@ -12,7 +12,10 @@
   <section id="chatWidget" class="chat-widget hidden" aria-label="Chat widget">
     <header class="chat-header">
       <h1>Chat</h1>
-      <button id="chatClose" class="close-button" aria-label="Close chat">X</button>
+      <div class="chat-header-actions">
+        <button id="newChatButton" class="header-button" aria-label="Start a new chat">New Chat</button>
+        <button id="chatClose" class="header-button close-button" aria-label="Close chat">X</button>
+      </div>
     </header>
 
     <main id="chatMessages" class="chat-messages" aria-live="polite" aria-label="Messages"></main>

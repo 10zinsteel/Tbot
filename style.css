@@ -54,9 +54,46 @@ body {
   font-weight: normal;
 }
 
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-button {
+  height: 32px;
+  border: 1px solid #444444;
+  background: #000000;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 0 10px;
+}
+
 .close-button {
   width: 32px;
-  height: 32px;
+  padding: 0;
+  text-align: center;
+}
+
+.header-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+#newChatButton {
+  font-size: 12px;
+}
+
+#sendButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+#chatInput:disabled {
+  opacity: 0.85;
+}
+
+.close-button {
   border: 1px solid #444444;
   background: #000000;
   color: #ffffff;

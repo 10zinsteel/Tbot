@@ -1,9 +1,11 @@
 const chatToggle = document.getElementById("chatToggle");
 const chatWidget = document.getElementById("chatWidget");
 const chatClose = document.getElementById("chatClose");
+const newChatButton = document.getElementById("newChatButton");
 const chatForm = document.getElementById("chatForm");
 const chatInput = document.getElementById("chatInput");
 const chatMessages = document.getElementById("chatMessages");
+const sendButton = document.getElementById("sendButton");
 const MAX_INPUT_HEIGHT = 120;
 
 function addMessage(text, sender) {
@@ -28,6 +30,37 @@ function closeChat() {
 
 chatToggle.addEventListener("click", openChat);
 chatClose.addEventListener("click", closeChat);
+newChatButton.addEventListener("click", async function () {
+  newChatButton.disabled = true;
+  sendButton.disabled = true;
+  chatInput.disabled = true;
+
+  try {
+    const res = await fetch("/api/reset", { method: "POST" });
+    let data = {};
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
+
+    if (!res.ok || data.success !== true) {
+      addMessage(data.error || "Could not start a new chat.", "bot");
+      return;
+    }
+
+    chatMessages.innerHTML = "";
+  } catch (err) {
+    console.error(err);
+    addMessage("Could not reset chat memory. Is the server running?", "bot");
+  } finally {
+    newChatButton.disabled = false;
+    sendButton.disabled = false;
+    chatInput.disabled = false;
+    chatInput.focus();
+    adjustInputHeight();
+  }
+});
 
 function adjustInputHeight() {
   chatInput.style.height = "auto";
@@ -45,8 +78,6 @@ chatInput.addEventListener("keydown", function (event) {
   }
 });
 
-const sendButton = document.getElementById("sendButton");
-
 chatForm.addEventListener("submit", async function (event) {
   event.preventDefault();
 
@@ -60,6 +91,7 @@ chatForm.addEventListener("submit", async function (event) {
   adjustInputHeight();
 
   sendButton.disabled = true;
+  newChatButton.disabled = true;
   chatInput.disabled = true;
 
   try {
@@ -91,6 +123,7 @@ chatForm.addEventListener("submit", async function (event) {
     addMessage("Could not reach the server. Is it running?", "bot");
   } finally {
     sendButton.disabled = false;
+    newChatButton.disabled = false;
     chatInput.disabled = false;
     chatInput.focus();
   }
