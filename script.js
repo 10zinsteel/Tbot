@@ -45,7 +45,9 @@ chatInput.addEventListener("keydown", function (event) {
   }
 });
 
-chatForm.addEventListener("submit", function (event) {
+const sendButton = document.getElementById("sendButton");
+
+chatForm.addEventListener("submit", async function (event) {
   event.preventDefault();
 
   const userText = chatInput.value.trim();
@@ -56,11 +58,42 @@ chatForm.addEventListener("submit", function (event) {
   addMessage(userText, "user");
   chatInput.value = "";
   adjustInputHeight();
-  chatInput.focus();
 
-  setTimeout(function () {
-    addMessage("Got it — SMS sending will be added later.", "bot");
-  }, 500);
+  sendButton.disabled = true;
+  chatInput.disabled = true;
+
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: userText }),
+    });
+
+    let data = {};
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
+
+    if (!res.ok) {
+      addMessage(data.error || "Something went wrong. Please try again.", "bot");
+      return;
+    }
+
+    if (data.reply) {
+      addMessage(data.reply, "bot");
+    } else {
+      addMessage("No reply from the assistant.", "bot");
+    }
+  } catch (err) {
+    console.error(err);
+    addMessage("Could not reach the server. Is it running?", "bot");
+  } finally {
+    sendButton.disabled = false;
+    chatInput.disabled = false;
+    chatInput.focus();
+  }
 });
 
 adjustInputHeight();
