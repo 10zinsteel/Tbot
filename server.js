@@ -147,6 +147,45 @@ function formatCalendarForChat(cal) {
   return `- ${cal.summary || "(No name)"}${primary} | calendarId: ${cal.calendarId}`;
 }
 
+function isCalendarReadQuery(message) {
+  const text = message.toLowerCase();
+  if (/(create|add|edit|update|move|reschedule|delete|remove|cancel)\b/.test(text)) {
+    return false;
+  }
+  return [
+    "my events",
+    "calendar",
+    "schedule",
+    "what do i have",
+    "upcoming",
+  ].some((phrase) => text.includes(phrase));
+}
+
+function formatEventStartForUser(start) {
+  if (!start) return "an unknown time";
+  const parsed = new Date(start);
+  if (Number.isNaN(parsed.getTime())) return start;
+  return parsed.toLocaleString("en-US", {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatUpcomingEventsReply(events) {
+  if (!events.length) {
+    return "You have no upcoming events.";
+  }
+
+  const lines = events.map((event, index) => {
+    const title = event.title || "Untitled event";
+    const when = formatEventStartForUser(event.start);
+    return `${index + 1}. ${title} at ${when}`;
+  });
+
+  return `You have ${events.length} upcoming events:\n${lines.join("\n")}`;
+}
+
 async function listUpcomingEventsForChat() {
   const calendar = getCalendarClient();
   const response = await calendar.events.list({
@@ -921,6 +960,17 @@ app.post("/api/chat", async (req, res) => {
     console.log(
       `[memory] sending full history to OpenAI | turns (excluding system): ${conversationHistory.length - 1}`
     );
+
+    if (isCalendarReadQuery(message)) {
+      const calendar = getCalendarClient();
+      const reply = !calendar
+        ? "Google Calendar is not connected. Click `Connect Google Calendar` first."
+        : formatUpcomingEventsReply(await listUpcomingEventsForChat());
+
+      conversationHistory.push({ role: "assistant", content: reply });
+      trimConversationHistory();
+      return res.json({ reply });
+    }
 
     const calendarResult = await handleCalendarChat(message);
     if (calendarResult.handled) {
