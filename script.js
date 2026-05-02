@@ -1,6 +1,7 @@
 const chatToggle = document.getElementById("chatToggle");
 const chatWidget = document.getElementById("chatWidget");
 const chatClose = document.getElementById("chatClose");
+const connectGoogleButton = document.getElementById("connectGoogleButton");
 const newChatButton = document.getElementById("newChatButton");
 const chatForm = document.getElementById("chatForm");
 const chatInput = document.getElementById("chatInput");
@@ -30,6 +31,9 @@ function closeChat() {
 
 chatToggle.addEventListener("click", openChat);
 chatClose.addEventListener("click", closeChat);
+connectGoogleButton.addEventListener("click", function () {
+  window.location.href = "/auth/google";
+});
 newChatButton.addEventListener("click", async function () {
   newChatButton.disabled = true;
   sendButton.disabled = true;

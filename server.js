@@ -3,6 +3,7 @@ import { fileURLToPath } from "url";
 import express from "express";
 import dotenv from "dotenv";
 import OpenAI from "openai";
+import { google } from "googleapis";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config();
@@ -14,6 +15,19 @@ const client = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.2";
+const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+const googleOAuthClient =
+  process.env.GOOGLE_CLIENT_ID &&
+  process.env.GOOGLE_CLIENT_SECRET &&
+  process.env.GOOGLE_REDIRECT_URI
+    ? new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        process.env.GOOGLE_REDIRECT_URI
+      )
+    : null;
+
+let googleTokens = null;
 
 const SYSTEM_MESSAGE = {
   role: "system",
@@ -34,6 +48,49 @@ function trimConversationHistory() {
 
 // Serve the TBot UI (HTML, CSS, JS) from the project root so /api/chat stays same-origin
 app.use(express.static(__dirname));
+
+app.get("/auth/google", (req, res) => {
+  if (!googleOAuthClient) {
+    return res.status(500).json({
+      error:
+        "Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI.",
+    });
+  }
+
+  const authUrl = googleOAuthClient.generateAuthUrl({
+    access_type: "offline",
+    scope: [GOOGLE_CALENDAR_SCOPE],
+    prompt: "consent",
+  });
+
+  res.redirect(authUrl);
+});
+
+app.get("/auth/google/callback", async (req, res) => {
+  try {
+    if (!googleOAuthClient) {
+      return res.status(500).json({
+        error:
+          "Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI.",
+      });
+    }
+
+    const { code } = req.query;
+    if (!code || typeof code !== "string") {
+      return res.status(400).json({ error: "Missing OAuth code" });
+    }
+
+    const { tokens } = await googleOAuthClient.getToken(code);
+    googleOAuthClient.setCredentials(tokens);
+    googleTokens = tokens;
+
+    console.log("[google-oauth] Google account connected successfully");
+    res.redirect("/");
+  } catch (error) {
+    console.error("[google-oauth] Callback error:", error);
+    res.status(500).json({ error: "Failed to connect Google account" });
+  }
+});
 
 app.post("/api/reset", (req, res) => {
   conversationHistory.length = 0;

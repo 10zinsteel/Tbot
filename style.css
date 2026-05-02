@@ -84,6 +84,10 @@ body {
   font-size: 12px;
 }
 
+#connectGoogleButton {
+  font-size: 12px;
+}
+
 #sendButton:disabled {
   opacity: 0.6;
   cursor: not-allowed;
