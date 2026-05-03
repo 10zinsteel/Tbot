@@ -578,10 +578,22 @@ function formatEventStartForUser(start) {
   const parsed = new Date(start);
   if (Number.isNaN(parsed.getTime())) return start;
   return parsed.toLocaleString("en-US", {
+    timeZone: CALENDAR_CHAT_TIME_ZONE,
     weekday: "short",
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function formatCreatedEventChatReply(event) {
+  const title = event.title || "Untitled event";
+  const when = formatEventStartForUser(event.start);
+  const link = event.htmlLink;
+  const firstLine = `Created event '${title}' at ${when}.`;
+  if (link) {
+    return `${firstLine}\nOpen it here: ${link}`;
+  }
+  return firstLine;
 }
 
 function formatUpcomingEventsReply(events) {
@@ -781,17 +793,22 @@ async function handleCalendarChat(message) {
       calendarId: "primary",
       requestBody: {
         summary: title,
-        start: { dateTime: start },
-        end: { dateTime: end },
+        start: { dateTime: start, timeZone: CALENDAR_CHAT_TIME_ZONE },
+        end: { dateTime: end, timeZone: CALENDAR_CHAT_TIME_ZONE },
         location: location || undefined,
         description: description || undefined,
       },
     });
 
+    console.log(
+      "[calendar] chat create events.insert full response:",
+      JSON.stringify(response.data, null, 2)
+    );
+
     const event = normalizeEventResponse(response.data);
     return {
       handled: true,
-      reply: `Created event "${event.title}" (${event.start} -> ${event.end}). eventId: ${event.eventId}`,
+      reply: formatCreatedEventChatReply(event),
     };
   }
 
@@ -1107,12 +1124,17 @@ app.post("/api/calendar/events", ensureGoogleCalendarConnected, async (req, res)
       calendarId: "primary",
       requestBody: {
         summary: title,
-        start: { dateTime: start },
-        end: { dateTime: end },
+        start: { dateTime: start, timeZone: CALENDAR_CHAT_TIME_ZONE },
+        end: { dateTime: end, timeZone: CALENDAR_CHAT_TIME_ZONE },
         location,
         description,
       },
     });
+
+    console.log(
+      "[calendar] API POST events.insert full response:",
+      JSON.stringify(response.data, null, 2)
+    );
 
     res.status(201).json({ event: normalizeEventResponse(response.data) });
   } catch (error) {
