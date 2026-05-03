@@ -97,7 +97,8 @@ function isCalendarIntent(message) {
     text.includes("calendar") ||
     text.includes("event") ||
     text.includes("schedule") ||
-    text.includes("reschedule")
+    text.includes("reschedule") ||
+    looksLikeFreeformCreateEvent(message)
   );
 }
 
@@ -433,6 +434,98 @@ function parseNaturalDateTimeTail(tail, timeZone, refDate) {
   return null;
 }
 
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractDatePartFromText(text, timeZone, refDate) {
+  const refY = getZonedYmd(timeZone, refDate).year;
+  const checks = [
+    /\b(today|tomorrow|tonight)\b/i,
+    /\b(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/i,
+    /\b([a-z]+\s+\d{1,2}(?:st|nd|rd|th)?(?:,)?(?:\s+\d{4})?)\b/i,
+  ];
+
+  for (const rx of checks) {
+    const match = text.match(rx);
+    if (!match) continue;
+    const phrase = match[1].trim();
+    let ymd = resolveRelativeDayWord(phrase, timeZone, refDate);
+    if (!ymd) ymd = parseSlashDate(phrase, refY);
+    if (!ymd) ymd = parseMonthDayYearPhrase(phrase, refY);
+    if (!ymd) continue;
+    return { ymd, phrase };
+  }
+
+  return { ymd: null, phrase: null };
+}
+
+function extractTimePartFromText(text) {
+  const checks = [
+    /\b(?:at\s+)?(\d{1,2}:\d{2}\s*(?:am|pm)?)\b/i,
+    /\b(?:at\s+)?(\d{1,2}\s*(?:am|pm))\b/i,
+  ];
+  for (const rx of checks) {
+    const match = text.match(rx);
+    if (!match) continue;
+    const phrase = match[1].trim();
+    const hm = parseClockTime(phrase);
+    if (hm) return { hm, phrase };
+  }
+  return { hm: null, phrase: null };
+}
+
+function removeExtractedPhrase(text, phrase, prepositions) {
+  if (!phrase) return text;
+  const pre = prepositions.length ? `(?:${prepositions.join("|")})\\s+` : "";
+  const rx = new RegExp(`\\b${pre}?${escapeRegex(phrase)}\\b`, "i");
+  return text.replace(rx, " ");
+}
+
+function extractNaturalTitle(message, datePhrase, timePhrase) {
+  let working = message
+    .replace(
+      /^\s*(?:please\s+)?(?:create|add|schedule)\b(?:\s+(?:an?\s+)?(?:event|meeting|appointment))?\b/i,
+      " "
+    )
+    .trim();
+
+  const named = working.match(/\b(?:called|named)\b\s+(.+)$/i);
+  if (named) {
+    working = named[1].trim();
+  } else {
+    working = working.replace(/\b(?:called|named)\b/gi, " ");
+  }
+
+  working = removeExtractedPhrase(working, datePhrase, ["on", "for"]);
+  working = removeExtractedPhrase(working, timePhrase, ["at"]);
+  working = working.replace(/\b(on|for|at)\b/gi, " ");
+  working = working.replace(/\s+/g, " ").replace(/^[\s,.;:-]+|[\s,.;:-]+$/g, "");
+  return working || null;
+}
+
+function hasNaturalDateToken(text) {
+  return (
+    /\b(today|tomorrow|tonight)\b/i.test(text) ||
+    /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/.test(text) ||
+    /\b(?:jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\s+\d{1,2}(?:st|nd|rd|th)?(?:,)?(?:\s+\d{4})?\b/i.test(
+      text
+    )
+  );
+}
+
+function hasNaturalTimeToken(text) {
+  return /\b\d{1,2}:\d{2}\s*(?:am|pm)?\b/i.test(text) || /\b\d{1,2}\s*(?:am|pm)\b/i.test(text);
+}
+
+function looksLikeFreeformCreateEvent(message) {
+  const text = message.toLowerCase();
+  if (!/\b(create|add|schedule)\b/.test(text)) return false;
+  if (/\breschedule\b/.test(text)) return false;
+  if (/\b(event|meeting|appointment)\b/.test(text)) return true;
+  return hasNaturalDateToken(message) && hasNaturalTimeToken(message);
+}
+
 const TRAILING_DATE_PATTERN =
   /\b(today|tomorrow|tonight|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|[a-z]+\s+\d{1,2}(?:st|nd|rd|th)?(?:,)?(?:\s+\d{4})?)$/i;
 
@@ -483,54 +576,38 @@ function parseAddMeetingDetails(message, timeZone, refDate) {
  */
 function parseNaturalCreateEvent(message, timeZone, refDate) {
   const t = message.trim();
-
-  let m = t.match(
-    /^create\s+(?:an\s+)?event\s+(?:called|named)\s+(.+?)\s+at\s+(.+)$/i
-  );
-  if (m) {
-    const title = m[1].trim();
-    const startUtc = parseNaturalDateTimeTail(m[2], timeZone, refDate);
-    return { title, startUtc };
+  if (!looksLikeFreeformCreateEvent(t)) {
+    return { title: null, startUtc: null, dateYmd: null, timeHm: null };
   }
 
-  m = t.match(/^create\s+(?:an\s+)?event\s+at\s+(.+)$/i);
-  if (m) {
-    const startUtc = parseNaturalDateTimeTail(m[1], timeZone, refDate);
-    return { title: null, startUtc };
-  }
+  const { ymd, phrase: datePhrase } = extractDatePartFromText(t, timeZone, refDate);
+  const { hm, phrase: timePhrase } = extractTimePartFromText(t);
+  const title = extractNaturalTitle(t, datePhrase, timePhrase);
+  const startUtc = instantFromYmdHm(ymd, hm, timeZone);
 
-  m = t.match(/^schedule\s+(.+?)\s+for\s+(.+)$/i);
-  if (m) {
-    const title = m[1].trim();
-    const startUtc = parseNaturalDateTimeTail(m[2], timeZone, refDate);
-    return { title, startUtc };
-  }
-
-  m = t.match(
-    /^add\s+(?:an\s+)?(?:event|appointment)\s+(?:called|named)\s+(.+?)\s+at\s+(.+)$/i
-  );
-  if (m) {
-    const title = m[1].trim();
-    const startUtc = parseNaturalDateTimeTail(m[2], timeZone, refDate);
-    return { title, startUtc };
+  if (title || startUtc || ymd || hm) {
+    return { title, startUtc, dateYmd: ymd, timeHm: hm };
   }
 
   const meeting = parseAddMeetingDetails(t, timeZone, refDate);
   if (meeting && (meeting.title || meeting.startUtc)) {
-    return { title: meeting.title, startUtc: meeting.startUtc };
+    return {
+      title: meeting.title,
+      startUtc: meeting.startUtc,
+      dateYmd: meeting.startUtc ? getZonedYmd(timeZone, meeting.startUtc) : null,
+      timeHm: null,
+    };
   }
 
-  return { title: null, startUtc: null };
+  return { title: null, startUtc: null, dateYmd: null, timeHm: null };
 }
 
-function followUpForMissingCreateFields(title, startIso) {
-  if (!title && !startIso) {
-    return "What would you like to call the event, and what day and time should it start?";
-  }
-  if (!title) {
-    return "What should I call this event?";
-  }
-  return "What day and time should it start? I will use Pacific time.";
+function followUpForMissingCreateFields(title, dateYmd, timeHm, startIso) {
+  if (!title) return "What should I call the event?";
+  if (!startIso && !dateYmd) return "What day is this for?";
+  if (!startIso && !timeHm) return "What time should it start?";
+  if (!startIso) return "What day is this for?";
+  return null;
 }
 
 function isReasonableDateTimeString(value) {
@@ -740,7 +817,8 @@ async function handleCalendarChat(message) {
       /\b(event|meeting|appointment)\b/.test(text)) ||
     (/schedule\b/.test(text) &&
       !/\breschedule\b/.test(text) &&
-      /\b(event|meeting|appointment)\b/.test(text));
+      /\b(event|meeting|appointment)\b/.test(text)) ||
+    looksLikeFreeformCreateEvent(message);
 
   if (wantsCreateEvent) {
     let title = readField(message, "title");
@@ -748,6 +826,8 @@ async function handleCalendarChat(message) {
     let end = readField(message, "end");
     const location = readField(message, "location");
     const description = readField(message, "description");
+    let naturalDateYmd = null;
+    let naturalTimeHm = null;
 
     if (!title || !start) {
       const nl = parseNaturalCreateEvent(
@@ -756,6 +836,8 @@ async function handleCalendarChat(message) {
         new Date()
       );
       if (!title && nl.title) title = nl.title;
+      naturalDateYmd = nl.dateYmd || null;
+      naturalTimeHm = nl.timeHm || null;
       if (!start && nl.startUtc) {
         start = utcInstantToRfc3339InZone(
           nl.startUtc,
@@ -765,9 +847,17 @@ async function handleCalendarChat(message) {
     }
 
     if (!title || !start) {
+      const followUp = followUpForMissingCreateFields(
+        title,
+        naturalDateYmd,
+        naturalTimeHm,
+        start
+      );
       return {
         handled: true,
-        reply: followUpForMissingCreateFields(title, start),
+        reply:
+          followUp ||
+          "What would you like to call the event, and what day and time should it start?",
       };
     }
 
@@ -776,7 +866,7 @@ async function handleCalendarChat(message) {
         handled: true,
         reply: title
           ? "I could not read that time. What day and time should it start?"
-          : followUpForMissingCreateFields(null, null),
+          : followUpForMissingCreateFields(null, null, null, null),
       };
     }
 
