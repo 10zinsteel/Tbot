@@ -137,6 +137,418 @@ function readCalendarId(message) {
   );
 }
 
+/** Calendar create flows interpret user date/time in this zone. */
+const CALENDAR_CHAT_TIME_ZONE = "America/Los_Angeles";
+const DEFAULT_EVENT_DURATION_MS = 30 * 60 * 1000;
+
+function formatUtcOffsetForZone(utcDate, timeZone) {
+  const tz =
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      timeZoneName: "longOffset",
+    })
+      .formatToParts(utcDate)
+      .find((p) => p.type === "timeZoneName")?.value || "";
+  const m = tz.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
+  if (!m) return "-08:00";
+  const sign = m[1];
+  const hh = String(m[2]).padStart(2, "0");
+  const mm = String(m[3] ?? "00").padStart(2, "0");
+  return `${sign}${hh}:${mm}`;
+}
+
+function utcInstantToRfc3339InZone(utcDate, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(utcDate);
+  const g = (t) => parts.find((p) => p.type === t)?.value ?? "00";
+  const off = formatUtcOffsetForZone(utcDate, timeZone);
+  return `${g("year")}-${g("month")}-${g("day")}T${g("hour")}:${g(
+    "minute"
+  )}:${g("second")}${off}`;
+}
+
+/**
+ * Interprets (year, month, day, hour, minute) as wall time in `timeZone`
+ * and returns the corresponding UTC instant.
+ */
+function zonedWallTimeToUtcDate(year, month, day, hour, minute, timeZone) {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  function zonedAt(ms) {
+    const o = {};
+    for (const p of fmt.formatToParts(new Date(ms))) {
+      if (p.type !== "literal") o[p.type] = p.value;
+    }
+    return [
+      Number(o.year),
+      Number(o.month),
+      Number(o.day),
+      Number(o.hour),
+      Number(o.minute),
+      Number(o.second || 0),
+    ];
+  }
+
+  function cmpZ(a, t) {
+    for (let i = 0; i < 5; i++) {
+      if (a[i] !== t[i]) return a[i] - t[i];
+    }
+    return 0;
+  }
+
+  const target = [year, month, day, hour, minute];
+  let lo = Date.UTC(year, month - 1, day - 2, 0, 0, 0);
+  let hi = Date.UTC(year, month - 1, day + 2, 23, 59, 59);
+
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const z = zonedAt(mid);
+    const c = cmpZ(z.slice(0, 5), target);
+    if (c === 0) {
+      const snapped = new Date(mid - z[5] * 1000);
+      return new Date(snapped.getTime() - snapped.getUTCMilliseconds());
+    }
+    if (c < 0) lo = mid + 1;
+    else hi = mid - 1;
+  }
+
+  return null;
+}
+
+function getZonedYmd(timeZone, refDate = new Date()) {
+  const o = {};
+  for (const p of new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(refDate)) {
+    if (p.type !== "literal") o[p.type] = p.value;
+  }
+  return {
+    year: Number(o.year),
+    month: Number(o.month),
+    day: Number(o.day),
+  };
+}
+
+function addCivilDays(year, month, day, deltaDays) {
+  const x = new Date(Date.UTC(year, month - 1, day + deltaDays));
+  return {
+    year: x.getUTCFullYear(),
+    month: x.getUTCMonth() + 1,
+    day: x.getUTCDate(),
+  };
+}
+
+function resolveRelativeDayWord(word, timeZone, refDate) {
+  const t = word.toLowerCase();
+  const { year, month, day } = getZonedYmd(timeZone, refDate);
+  if (t === "today" || t === "tonight") return { year, month, day };
+  if (t === "tomorrow") return addCivilDays(year, month, day, 1);
+  return null;
+}
+
+const MONTH_NAME_TO_NUM = {
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12,
+};
+
+function parseClockTime(str) {
+  const s = str.trim().toLowerCase().replace(/\./g, "");
+  let m = s.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/);
+  if (m) {
+    let h = Number(m[1]);
+    const min = Number(m[2]);
+    const ap = m[3];
+    if (ap === "pm" && h < 12) h += 12;
+    if (ap === "am" && h === 12) h = 0;
+    if (!ap && h > 23) return null;
+    if (h < 0 || h > 23 || min > 59) return null;
+    return { hour: h, minute: min };
+  }
+  m = s.match(/^(\d{1,2})\s*(am|pm)$/);
+  if (m) {
+    let h = Number(m[1]);
+    const ap = m[2];
+    if (ap === "pm" && h < 12) h += 12;
+    if (ap === "am" && h === 12) h = 0;
+    if (h < 0 || h > 23) return null;
+    return { hour: h, minute: 0 };
+  }
+  m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (m) {
+    const h = Number(m[1]);
+    const min = Number(m[2]);
+    if (h > 23 || min > 59) return null;
+    return { hour: h, minute: min };
+  }
+  return null;
+}
+
+function parseSlashDate(str, defaultYear) {
+  const m = str.trim().match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/);
+  if (!m) return null;
+  const month = Number(m[1]);
+  const day = Number(m[2]);
+  let year = m[3] ? Number(m[3]) : defaultYear;
+  if (m[3] && m[3].length === 2) year = 2000 + Number(m[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { year, month, day };
+}
+
+function parseMonthDayYearPhrase(frag, defaultYear) {
+  const s = frag.trim();
+  const m = s.match(
+    /^([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,)?(?:\s+(\d{4}))?$/i
+  );
+  if (!m) return null;
+  const moKey = m[1].toLowerCase();
+  const month = MONTH_NAME_TO_NUM[moKey];
+  if (!month) return null;
+  const day = Number(m[2]);
+  const year = m[3] ? Number(m[3]) : defaultYear;
+  if (day < 1 || day > 31) return null;
+  return { year, month, day };
+}
+
+function instantFromYmdHm(ymd, hm, timeZone) {
+  if (!ymd || !hm) return null;
+  return zonedWallTimeToUtcDate(
+    ymd.year,
+    ymd.month,
+    ymd.day,
+    hm.hour,
+    hm.minute,
+    timeZone
+  );
+}
+
+function parseNaturalDateTimeTail(tail, timeZone, refDate) {
+  const raw = tail.trim().replace(/\s+/g, " ");
+  const lower = raw.toLowerCase();
+
+  let m = lower.match(/^(today|tomorrow|tonight)\s+at\s+(.+)$/);
+  if (m) {
+    const ymd = resolveRelativeDayWord(m[1], timeZone, refDate);
+    const hm = parseClockTime(m[2]);
+    return instantFromYmdHm(ymd, hm, timeZone);
+  }
+
+  m = raw.match(
+    /^([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,)?(?:\s+(\d{4}))?\s+at\s+(.+)$/i
+  );
+  if (m) {
+    const moKey = m[1].toLowerCase();
+    const month = MONTH_NAME_TO_NUM[moKey];
+    const dayNum = Number(m[2]);
+    const defaultY = getZonedYmd(timeZone, refDate).year;
+    const yearNum = m[3] ? Number(m[3]) : defaultY;
+    const hm = parseClockTime(m[4]);
+    const ymd =
+      month && dayNum >= 1 && dayNum <= 31
+        ? { year: yearNum, month, day: dayNum }
+        : null;
+    return instantFromYmdHm(ymd, hm, timeZone);
+  }
+
+  const core = lower.startsWith("at ") ? raw.slice(3).trim() : raw;
+  const tokens = core.split(/\s+/).filter(Boolean);
+  const refY = getZonedYmd(timeZone, refDate).year;
+
+  if (tokens.length === 2) {
+    let hm = parseClockTime(tokens[0]);
+    let ymd = parseSlashDate(tokens[1], refY);
+    if (!ymd) ymd = parseMonthDayYearPhrase(tokens[1], refY);
+    let inst = instantFromYmdHm(ymd, hm, timeZone);
+    if (inst) return inst;
+
+    hm = parseClockTime(tokens[1]);
+    ymd = parseSlashDate(tokens[0], refY);
+    if (!ymd) ymd = parseMonthDayYearPhrase(tokens[0], refY);
+    inst = instantFromYmdHm(ymd, hm, timeZone);
+    if (inst) return inst;
+  }
+
+  if (tokens.length >= 2) {
+    const lastHm = parseClockTime(tokens[tokens.length - 1]);
+    if (lastHm) {
+      const dateStr = tokens.slice(0, -1).join(" ");
+      let ymd = parseSlashDate(dateStr, refY);
+      if (!ymd) ymd = parseMonthDayYearPhrase(dateStr, refY);
+      if (!ymd) ymd = resolveRelativeDayWord(dateStr, timeZone, refDate);
+      const inst = instantFromYmdHm(ymd, lastHm, timeZone);
+      if (inst) return inst;
+    }
+    const firstHm = parseClockTime(tokens[0]);
+    if (firstHm) {
+      const dateStr = tokens.slice(1).join(" ");
+      let ymd = parseSlashDate(dateStr, refY);
+      if (!ymd) ymd = parseMonthDayYearPhrase(dateStr, refY);
+      if (!ymd) ymd = resolveRelativeDayWord(dateStr, timeZone, refDate);
+      const inst = instantFromYmdHm(ymd, firstHm, timeZone);
+      if (inst) return inst;
+    }
+  }
+
+  return null;
+}
+
+const TRAILING_DATE_PATTERN =
+  /\b(today|tomorrow|tonight|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|[a-z]+\s+\d{1,2}(?:st|nd|rd|th)?(?:,)?(?:\s+\d{4})?)$/i;
+
+function stripTrailingDatePhrase(beforeAt) {
+  const s = beforeAt.trim();
+  const m = s.match(TRAILING_DATE_PATTERN);
+  if (!m) return { title: s.trim(), datePhrase: null };
+  const idx = s.lastIndexOf(m[0]);
+  if (idx === -1) return { title: s.trim(), datePhrase: null };
+  const title = s.slice(0, idx).trim();
+  return { title, datePhrase: m[0].trim() };
+}
+
+function parseAddMeetingDetails(message, timeZone, refDate) {
+  const m = message.match(/^add\s+(?:an?\s+)?meeting(?:\s+called|\s+named)?\s*(.*)$/i);
+  if (!m) return null;
+  let rest = m[1].trim();
+  const atIdx = rest.toLowerCase().lastIndexOf(" at ");
+  if (atIdx === -1) return { title: null, startUtc: null, ambiguous: true };
+
+  const beforeAt = rest.slice(0, atIdx).trim();
+  const timePart = rest.slice(atIdx + 4).trim();
+  const hm = parseClockTime(timePart);
+  if (!hm) return { title: null, startUtc: null, ambiguous: true };
+
+  const { title, datePhrase } = stripTrailingDatePhrase(beforeAt);
+  let ymd = null;
+  if (datePhrase) {
+    ymd = resolveRelativeDayWord(datePhrase, timeZone, refDate);
+    const refY = getZonedYmd(timeZone, refDate).year;
+    if (!ymd) ymd = parseSlashDate(datePhrase, refY);
+    if (!ymd) ymd = parseMonthDayYearPhrase(datePhrase, refY);
+  }
+
+  const resolvedTitle =
+    title.length > 0 ? title : datePhrase ? "Meeting" : null;
+  const startUtc = instantFromYmdHm(ymd, hm, timeZone);
+  return {
+    title: resolvedTitle,
+    startUtc,
+    ambiguous: !resolvedTitle || !startUtc,
+  };
+}
+
+/**
+ * Try to read title + start instant from conversational create-event text.
+ * Returns { title, startUtc } or partial with nulls.
+ */
+function parseNaturalCreateEvent(message, timeZone, refDate) {
+  const t = message.trim();
+
+  let m = t.match(
+    /^create\s+(?:an\s+)?event\s+(?:called|named)\s+(.+?)\s+at\s+(.+)$/i
+  );
+  if (m) {
+    const title = m[1].trim();
+    const startUtc = parseNaturalDateTimeTail(m[2], timeZone, refDate);
+    return { title, startUtc };
+  }
+
+  m = t.match(/^create\s+(?:an\s+)?event\s+at\s+(.+)$/i);
+  if (m) {
+    const startUtc = parseNaturalDateTimeTail(m[1], timeZone, refDate);
+    return { title: null, startUtc };
+  }
+
+  m = t.match(/^schedule\s+(.+?)\s+for\s+(.+)$/i);
+  if (m) {
+    const title = m[1].trim();
+    const startUtc = parseNaturalDateTimeTail(m[2], timeZone, refDate);
+    return { title, startUtc };
+  }
+
+  m = t.match(
+    /^add\s+(?:an\s+)?(?:event|appointment)\s+(?:called|named)\s+(.+?)\s+at\s+(.+)$/i
+  );
+  if (m) {
+    const title = m[1].trim();
+    const startUtc = parseNaturalDateTimeTail(m[2], timeZone, refDate);
+    return { title, startUtc };
+  }
+
+  const meeting = parseAddMeetingDetails(t, timeZone, refDate);
+  if (meeting && (meeting.title || meeting.startUtc)) {
+    return { title: meeting.title, startUtc: meeting.startUtc };
+  }
+
+  return { title: null, startUtc: null };
+}
+
+function followUpForMissingCreateFields(title, startIso) {
+  if (!title && !startIso) {
+    return "What would you like to call the event, and what day and time should it start?";
+  }
+  if (!title) {
+    return "What should I call this event?";
+  }
+  return "What day and time should it start? I will use Pacific time.";
+}
+
+function isReasonableDateTimeString(value) {
+  if (!value || typeof value !== "string") return false;
+  const d = new Date(value.trim());
+  return !Number.isNaN(d.getTime());
+}
+
+function ensureEndDateTime(start, end, timeZone) {
+  if (end) return end;
+  const startDate = new Date(start);
+  if (Number.isNaN(startDate.getTime())) return null;
+  return utcInstantToRfc3339InZone(
+    new Date(startDate.getTime() + DEFAULT_EVENT_DURATION_MS),
+    timeZone
+  );
+}
+
 function formatEventForChat(event) {
   const start = event.start || "Unknown start";
   return `- ${event.title || "(No title)"} | ${start} | eventId: ${event.eventId}`;
@@ -311,18 +723,57 @@ async function handleCalendarChat(message) {
     };
   }
 
-  if (/(create|add)\b/.test(text) && /(event)/.test(text)) {
-    const title = readField(message, "title");
-    const start = readField(message, "start");
-    const end = readField(message, "end");
+  const wantsCreateEvent =
+    (/(create|add)\b/.test(text) &&
+      /\b(event|meeting|appointment)\b/.test(text)) ||
+    (/schedule\b/.test(text) &&
+      !/\breschedule\b/.test(text) &&
+      /\b(event|meeting|appointment)\b/.test(text));
+
+  if (wantsCreateEvent) {
+    let title = readField(message, "title");
+    let start = readField(message, "start");
+    let end = readField(message, "end");
     const location = readField(message, "location");
     const description = readField(message, "description");
 
-    if (!title || !start || !end) {
+    if (!title || !start) {
+      const nl = parseNaturalCreateEvent(
+        message,
+        CALENDAR_CHAT_TIME_ZONE,
+        new Date()
+      );
+      if (!title && nl.title) title = nl.title;
+      if (!start && nl.startUtc) {
+        start = utcInstantToRfc3339InZone(
+          nl.startUtc,
+          CALENDAR_CHAT_TIME_ZONE
+        );
+      }
+    }
+
+    if (!title || !start) {
+      return {
+        handled: true,
+        reply: followUpForMissingCreateFields(title, start),
+      };
+    }
+
+    if (!isReasonableDateTimeString(start)) {
+      return {
+        handled: true,
+        reply: title
+          ? "I could not read that time. What day and time should it start?"
+          : followUpForMissingCreateFields(null, null),
+      };
+    }
+
+    end = ensureEndDateTime(start, end, CALENDAR_CHAT_TIME_ZONE);
+    if (!end) {
       return {
         handled: true,
         reply:
-          "To create an event, include `title`, `start`, and `end`.\nExample: create event title:\"Team Sync\", start:\"2026-05-03T14:00:00-07:00\", end:\"2026-05-03T14:30:00-07:00\"",
+          "I could not figure out the end time from that start time. Can you try the time again?",
       };
     }
 
