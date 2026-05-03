@@ -1465,8 +1465,33 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`TBot server running at http://localhost:${PORT}`);
-  console.log("[memory] short-term conversation memory initialized");
-});
+const DEFAULT_PORT = Number(process.env.PORT) || 3000;
+
+/**
+ * Start the HTTP server. Used by `node server.js` and by the Electron shell.
+ * @param {number} [port=DEFAULT_PORT]
+ * @returns {Promise<import("http").Server>}
+ */
+export function startServer(port = DEFAULT_PORT) {
+  return new Promise((resolve, reject) => {
+    const httpServer = app.listen(port, () => {
+      console.log(`TBot server running at http://localhost:${port}`);
+      console.log("[memory] short-term conversation memory initialized");
+      resolve(httpServer);
+    });
+    httpServer.on("error", reject);
+  });
+}
+
+function isDirectNodeRun() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  return path.resolve(entry) === path.resolve(fileURLToPath(import.meta.url));
+}
+
+if (isDirectNodeRun()) {
+  startServer().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
