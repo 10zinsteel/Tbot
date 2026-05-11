@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import { google } from "googleapis";
 
 const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";

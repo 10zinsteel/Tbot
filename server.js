@@ -7,7 +7,11 @@ import googleAuthRoutes from "./routes/googleAuthRoutes.js";
 import calendarRoutes from "./routes/calendarRoutes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config();
+dotenv.config({ path: path.join(__dirname, ".env") });
+
+// test
+// console.log(process.env.GOOGLE_CLIENT_ID);
+// console.log(process.env.GOOGLE_CLIENT_SECRET);
 
 const app = express();
 app.use(express.json());
