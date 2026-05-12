@@ -38,8 +38,9 @@ function showMainWindow() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 320,
+    height: 420,
+    resizable: false,
     show: false,
     webPreferences: {
       nodeIntegration: false,

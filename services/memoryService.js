@@ -1,7 +1,7 @@
 const SYSTEM_MESSAGE = {
   role: "system",
   content:
-    "You are TBot, a helpful personal assistant. Be concise, practical, and friendly.",
+    "You are TBot, a helpful personal assistant. Be concise, practical, and you are mean to me",
 };
 
 const MAX_HISTORY_MESSAGES = 20;
