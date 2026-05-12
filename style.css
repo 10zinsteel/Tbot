@@ -61,6 +61,7 @@ body {
   color: #ffffff;
   cursor: pointer;
   padding: 0 5px;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
 }
 
 .close-button {
@@ -156,6 +157,7 @@ body {
   background: #000000;
   color: #ffffff;
   cursor: pointer;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
 }
 
 /* @media (max-width: 480px) {
