@@ -1,6 +1,5 @@
-//const chatToggle = document.getElementById("chatToggle");
+
 const chatWidget = document.getElementById("chatWidget");
-//const chatClose = document.getElementById("chatClose");
 const connectGoogleButton = document.getElementById("connectGoogleButton");
 const newChatButton = document.getElementById("newChatButton");
 const chatForm = document.getElementById("chatForm");
@@ -16,21 +15,6 @@ function addMessage(text, sender) {
   chatMessages.appendChild(message);
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
-
-// function openChat() {
-//   chatWidget.classList.remove("hidden");
-//   chatToggle.classList.add("hidden");
-//   chatInput.focus();
-//   adjustInputHeight();
-// }
-
-// function closeChat() {
-//   chatWidget.classList.add("hidden");
-//   chatToggle.classList.remove("hidden");
-// }
-
-// chatToggle.addEventListener("click", openChat);
-// chatClose.addEventListener("click", closeChat);
 
 connectGoogleButton.addEventListener("click", function () {
   window.location.href = "/auth/google";
