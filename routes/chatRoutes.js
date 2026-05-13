@@ -5,14 +5,6 @@ import {
   trimConversationHistory,
   resetConversationHistory,
 } from "../services/memoryService.js";
-import {
-  getCalendarClient,
-  listUpcomingEventsForChat,
-} from "../services/googleCalendarService.js";
-import {
-  isCalendarReadQuery,
-  formatUpcomingEventsReply,
-} from "../utils/calendarParser.js";
 import { handleCalendarChat } from "../services/calendarChatService.js";
 
 const router = express.Router();
@@ -38,17 +30,6 @@ router.post("/api/chat", async (req, res) => {
     console.log(
       `[memory] sending full history to OpenAI | turns (excluding system): ${conversationHistory.length - 1}`
     );
-
-    if (isCalendarReadQuery(message)) {
-      const calendar = getCalendarClient();
-      const reply = !calendar
-        ? "Google Calendar is not connected. Click `Connect Google Calendar` first."
-        : formatUpcomingEventsReply(await listUpcomingEventsForChat());
-
-      conversationHistory.push({ role: "assistant", content: reply });
-      trimConversationHistory();
-      return res.json({ reply });
-    }
 
     const calendarResult = await handleCalendarChat(message);
     if (calendarResult.handled) {

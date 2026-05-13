@@ -4,32 +4,17 @@ import {
   listUpcomingEventsForChat,
   listCalendarsForChat,
 } from "./googleCalendarService.js";
+import { extractCalendarIntent } from "./openaiService.js";
 import {
   CALENDAR_CHAT_TIME_ZONE,
-  looksLikeFreeformCreateEvent,
-  parseNaturalCreateEvent,
-  followUpForMissingCreateFields,
-  isReasonableDateTimeString,
   ensureEndDateTime,
-  utcInstantToRfc3339InZone,
   formatEventForChat,
   formatCalendarForChat,
   formatCreatedEventChatReply,
+  formatUpcomingEventsReply,
 } from "../utils/calendarParser.js";
 
 let pendingCalendarAction = null;
-
-function isCalendarIntent(message) {
-  const text = message.toLowerCase();
-  if (pendingCalendarAction) return true;
-  return (
-    text.includes("calendar") ||
-    text.includes("event") ||
-    text.includes("schedule") ||
-    text.includes("reschedule") ||
-    looksLikeFreeformCreateEvent(message)
-  );
-}
 
 function isAffirmative(message) {
   return /^(yes|y|confirm|confirmed|do it|proceed|delete it)\b/i.test(
@@ -39,28 +24,6 @@ function isAffirmative(message) {
 
 function isNegative(message) {
   return /^(no|n|stop|cancel|never mind)\b/i.test(message.trim());
-}
-
-function readField(message, field) {
-  const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(
-    `\\b${escaped}\\b\\s*(?:=|:|is)?\\s*(?:"([^"]+)"|'([^']+)'|([^,;\\n]+))`,
-    "i"
-  );
-  const match = message.match(regex);
-  return (match?.[1] || match?.[2] || match?.[3] || "").trim() || null;
-}
-
-function readEventId(message) {
-  return readField(message, "eventId") || readField(message, "event id") || null;
-}
-
-function readCalendarId(message) {
-  return (
-    readField(message, "calendarId") ||
-    readField(message, "calendar id") ||
-    null
-  );
 }
 
 async function handlePendingCalendarAction(message) {
@@ -116,7 +79,9 @@ async function handleCalendarChat(message) {
     return { handled: true, reply: pendingReply };
   }
 
-  if (!isCalendarIntent(message)) {
+  const intent = await extractCalendarIntent(message, CALENDAR_CHAT_TIME_ZONE, new Date());
+
+  if (intent.intent === "unknown") {
     return { handled: false };
   }
 
@@ -128,32 +93,12 @@ async function handleCalendarChat(message) {
     };
   }
 
-  const text = message.toLowerCase();
-
-  const wantsEventsList =
-    /(show|list|what|upcoming|next)\b/.test(text) &&
-    /(event|events|calendar)/.test(text) &&
-    !/(delete|remove|cancel|create|add|edit|update|move|reschedule)/.test(text);
-
-  if (wantsEventsList) {
+  if (intent.intent === "list_events") {
     const events = await listUpcomingEventsForChat();
-    if (!events.length) {
-      return { handled: true, reply: "No upcoming events found." };
-    }
-    return {
-      handled: true,
-      reply: `Here are your next ${events.length} events:\n${events
-        .map(formatEventForChat)
-        .join("\n")}`,
-    };
+    return { handled: true, reply: formatUpcomingEventsReply(events) };
   }
 
-  const wantsCalendarList =
-    /(show|list|what)\b/.test(text) &&
-    /calendars/.test(text) &&
-    !/(delete|remove|create|add|edit|update)/.test(text);
-
-  if (wantsCalendarList) {
+  if (intent.intent === "list_calendars") {
     const calendars = await listCalendarsForChat();
     if (!calendars.length) {
       return { handled: true, reply: "No calendars found." };
@@ -164,118 +109,60 @@ async function handleCalendarChat(message) {
     };
   }
 
-  const wantsCreateEvent =
-    (/(create|add)\b/.test(text) &&
-      /\b(event|meeting|appointment)\b/.test(text)) ||
-    (/schedule\b/.test(text) &&
-      !/\breschedule\b/.test(text) &&
-      /\b(event|meeting|appointment)\b/.test(text)) ||
-    looksLikeFreeformCreateEvent(message);
-
-  if (wantsCreateEvent) {
-    let title = readField(message, "title");
-    let start = readField(message, "start");
-    let end = readField(message, "end");
-    const location = readField(message, "location");
-    const description = readField(message, "description");
-    let naturalDateYmd = null;
-    let naturalTimeHm = null;
-
-    if (!title || !start) {
-      const nl = parseNaturalCreateEvent(message, CALENDAR_CHAT_TIME_ZONE, new Date());
-      if (!title && nl.title) title = nl.title;
-      naturalDateYmd = nl.dateYmd || null;
-      naturalTimeHm = nl.timeHm || null;
-      if (!start && nl.startUtc) {
-        start = utcInstantToRfc3339InZone(nl.startUtc, CALENDAR_CHAT_TIME_ZONE);
-      }
+  if (intent.intent === "create_event") {
+    if (!intent.title) {
+      return { handled: true, reply: "What should I call the event?" };
     }
-
-    if (!title || !start) {
-      const followUp = followUpForMissingCreateFields(
-        title,
-        naturalDateYmd,
-        naturalTimeHm,
-        start
-      );
-      return {
-        handled: true,
-        reply:
-          followUp ||
-          "What would you like to call the event, and what day and time should it start?",
-      };
+    if (!intent.start) {
+      return { handled: true, reply: "What day and time should it start?" };
     }
-
-    if (!isReasonableDateTimeString(start)) {
-      return {
-        handled: true,
-        reply: title
-          ? "I could not read that time. What day and time should it start?"
-          : followUpForMissingCreateFields(null, null, null, null),
-      };
-    }
-
-    end = ensureEndDateTime(start, end, CALENDAR_CHAT_TIME_ZONE);
+    const end = ensureEndDateTime(intent.start, intent.end);
     if (!end) {
       return {
         handled: true,
-        reply:
-          "I could not figure out the end time from that start time. Can you try the time again?",
+        reply: "I could not figure out the end time from that start time. Can you try again?",
       };
     }
-
     const response = await calendar.events.insert({
       calendarId: "primary",
       requestBody: {
-        summary: title,
-        start: { dateTime: start, timeZone: CALENDAR_CHAT_TIME_ZONE },
+        summary: intent.title,
+        start: { dateTime: intent.start, timeZone: CALENDAR_CHAT_TIME_ZONE },
         end: { dateTime: end, timeZone: CALENDAR_CHAT_TIME_ZONE },
-        location: location || undefined,
-        description: description || undefined,
+        location: intent.location || undefined,
+        description: intent.description || undefined,
       },
     });
-
     const event = normalizeEventResponse(response.data);
     return { handled: true, reply: formatCreatedEventChatReply(event) };
   }
 
-  if (/(edit|update)\b/.test(text) && /(event)/.test(text)) {
-    const eventId = readEventId(message);
-    const title = readField(message, "title");
-    const start = readField(message, "start");
-    const end = readField(message, "end");
-    const location = readField(message, "location");
-    const description = readField(message, "description");
-
-    const updates = {};
-    if (title !== null) updates.summary = title;
-    if (start !== null) updates.start = { dateTime: start };
-    if (end !== null) updates.end = { dateTime: end };
-    if (location !== null) updates.location = location;
-    if (description !== null) updates.description = description;
-
-    if (!eventId) {
+  if (intent.intent === "update_event") {
+    if (!intent.eventId) {
       const events = await listUpcomingEventsForChat();
       const listText = events.length
         ? `\n${events.map(formatEventForChat).join("\n")}`
         : "";
       return {
         handled: true,
-        reply: `I need an eventId to edit an event. Here are upcoming events:${listText}\nReply with eventId and fields to update.`,
+        reply: `I need an eventId to update an event. Here are upcoming events:${listText}\nReply with eventId and fields to update.`,
       };
     }
-
+    const updates = {};
+    if (intent.title) updates.summary = intent.title;
+    if (intent.start) updates.start = { dateTime: intent.start };
+    if (intent.end) updates.end = { dateTime: intent.end };
+    if (intent.location) updates.location = intent.location;
+    if (intent.description) updates.description = intent.description;
     if (Object.keys(updates).length === 0) {
       return {
         handled: true,
-        reply:
-          "Tell me what to update (title, start, end, location, or description).\nExample: update event eventId:\"abc123\" title:\"New title\"",
+        reply: "Tell me what to update (title, start, end, location, or description).",
       };
     }
-
     const response = await calendar.events.patch({
       calendarId: "primary",
-      eventId,
+      eventId: intent.eventId,
       requestBody: updates,
     });
     const event = normalizeEventResponse(response.data);
@@ -285,12 +172,8 @@ async function handleCalendarChat(message) {
     };
   }
 
-  if (/(move|reschedule)\b/.test(text) && /(event)/.test(text)) {
-    const eventId = readEventId(message);
-    const start = readField(message, "start");
-    const end = readField(message, "end");
-
-    if (!eventId) {
+  if (intent.intent === "move_event") {
+    if (!intent.eventId) {
       const events = await listUpcomingEventsForChat();
       const listText = events.length
         ? `\n${events.map(formatEventForChat).join("\n")}`
@@ -300,21 +183,18 @@ async function handleCalendarChat(message) {
         reply: `I need an eventId to reschedule an event. Here are upcoming events:${listText}\nReply with eventId, start, and end.`,
       };
     }
-
-    if (!start || !end) {
+    if (!intent.start || !intent.end) {
       return {
         handled: true,
-        reply:
-          "To move an event, provide `start` and `end`.\nExample: move event eventId:\"abc123\" start:\"2026-05-04T10:00:00-07:00\" end:\"2026-05-04T10:30:00-07:00\"",
+        reply: "To move an event, I need both a new start and end time.",
       };
     }
-
     const response = await calendar.events.patch({
       calendarId: "primary",
-      eventId,
+      eventId: intent.eventId,
       requestBody: {
-        start: { dateTime: start },
-        end: { dateTime: end },
+        start: { dateTime: intent.start },
+        end: { dateTime: intent.end },
       },
     });
     const event = normalizeEventResponse(response.data);
@@ -324,9 +204,8 @@ async function handleCalendarChat(message) {
     };
   }
 
-  if (/(delete|remove|cancel)\b/.test(text) && /(event)/.test(text)) {
-    const eventId = readEventId(message);
-    if (!eventId) {
+  if (intent.intent === "delete_event") {
+    if (!intent.eventId) {
       const events = await listUpcomingEventsForChat();
       const listText = events.length
         ? `\n${events.map(formatEventForChat).join("\n")}`
@@ -336,38 +215,34 @@ async function handleCalendarChat(message) {
         reply: `I need an eventId before deleting an event. Here are upcoming events:${listText}`,
       };
     }
-
-    const event = await calendar.events.get({ calendarId: "primary", eventId });
-    const eventTitle = event.data.summary || eventId;
+    const event = await calendar.events.get({
+      calendarId: "primary",
+      eventId: intent.eventId,
+    });
+    const eventTitle = event.data.summary || intent.eventId;
     pendingCalendarAction = {
       type: "deleteEventConfirm",
-      payload: { eventId, title: eventTitle },
+      payload: { eventId: intent.eventId, title: eventTitle },
     };
     return {
       handled: true,
-      reply: `Please confirm deletion of event "${eventTitle}" (eventId: ${eventId}). Reply with \`confirm\` to proceed or \`cancel\` to abort.`,
+      reply: `Please confirm deletion of event "${eventTitle}" (eventId: ${intent.eventId}). Reply with \`confirm\` to proceed or \`cancel\` to abort.`,
     };
   }
 
-  if (/(create|add)\b/.test(text) && /calendar/.test(text)) {
-    const summary = readField(message, "summary") || readField(message, "name");
-    const description = readField(message, "description");
-    const timeZone =
-      readField(message, "timeZone") || readField(message, "timezone");
-
-    if (!summary) {
+  if (intent.intent === "create_calendar") {
+    const calSummary = intent.summary || intent.title;
+    if (!calSummary) {
       return {
         handled: true,
-        reply:
-          "To create a secondary calendar, provide `summary` (or `name`).\nExample: create calendar summary:\"Project X\" timeZone:\"America/Los_Angeles\"",
+        reply: 'To create a calendar, provide a name. Example: create a calendar called "Work Projects"',
       };
     }
-
     const response = await calendar.calendars.insert({
       requestBody: {
-        summary,
-        description: description || undefined,
-        timeZone: timeZone || undefined,
+        summary: calSummary,
+        description: intent.description || undefined,
+        timeZone: intent.timeZone || undefined,
       },
     });
     return {
@@ -376,14 +251,8 @@ async function handleCalendarChat(message) {
     };
   }
 
-  if (/(edit|update)\b/.test(text) && /calendar/.test(text)) {
-    const calendarId = readCalendarId(message);
-    const summary = readField(message, "summary") || readField(message, "name");
-    const description = readField(message, "description");
-    const timeZone =
-      readField(message, "timeZone") || readField(message, "timezone");
-
-    if (!calendarId) {
+  if (intent.intent === "update_calendar") {
+    if (!intent.calendarId) {
       const calendars = await listCalendarsForChat();
       return {
         handled: true,
@@ -392,20 +261,18 @@ async function handleCalendarChat(message) {
           .join("\n")}`,
       };
     }
-
     const updates = {};
-    if (summary !== null) updates.summary = summary;
-    if (description !== null) updates.description = description;
-    if (timeZone !== null) updates.timeZone = timeZone;
+    if (intent.summary) updates.summary = intent.summary;
+    if (intent.description) updates.description = intent.description;
+    if (intent.timeZone) updates.timeZone = intent.timeZone;
     if (Object.keys(updates).length === 0) {
       return {
         handled: true,
         reply: "Provide at least one field to update: summary, description, or timeZone.",
       };
     }
-
     const response = await calendar.calendars.patch({
-      calendarId,
+      calendarId: intent.calendarId,
       requestBody: updates,
     });
     return {
@@ -414,9 +281,8 @@ async function handleCalendarChat(message) {
     };
   }
 
-  if (/(delete|remove)\b/.test(text) && /calendar/.test(text)) {
-    const calendarId = readCalendarId(message);
-    if (!calendarId) {
+  if (intent.intent === "delete_calendar") {
+    if (!intent.calendarId) {
       const calendars = await listCalendarsForChat();
       return {
         handled: true,
@@ -425,32 +291,30 @@ async function handleCalendarChat(message) {
           .join("\n")}`,
       };
     }
-
-    const meta = await calendar.calendars.get({ calendarId });
+    const meta = await calendar.calendars.get({ calendarId: intent.calendarId });
     if (meta.data?.primary) {
       return {
         handled: true,
         reply: "The primary calendar cannot be deleted. Choose a secondary calendar instead.",
       };
     }
-
     pendingCalendarAction = {
       type: "deleteCalendarConfirm",
       payload: {
-        calendarId,
-        summary: meta.data?.summary || calendarId,
+        calendarId: intent.calendarId,
+        summary: meta.data?.summary || intent.calendarId,
       },
     };
     return {
       handled: true,
-      reply: `Please confirm deletion of calendar "${meta.data?.summary || calendarId}" (calendarId: ${calendarId}). Reply with \`confirm\` to proceed or \`cancel\` to abort.`,
+      reply: `Please confirm deletion of calendar "${meta.data?.summary || intent.calendarId}" (calendarId: ${intent.calendarId}). Reply with \`confirm\` to proceed or \`cancel\` to abort.`,
     };
   }
 
   return {
     handled: true,
     reply:
-      "I can help with calendar actions like listing events/calendars, creating/updating/rescheduling events, and managing secondary calendars. Include labeled fields like `eventId`, `title`, `start`, `end`, `calendarId`, `summary`, and `timeZone` when applicable.",
+      "I can help with calendar actions like listing events/calendars, creating/updating/rescheduling events, and managing calendars.",
   };
 }
 
