@@ -13,6 +13,12 @@ import {
   formatCreatedEventChatReply,
   formatUpcomingEventsReply,
 } from "../utils/calendarParser.js";
+import {
+  registerEvent,
+  releaseEvent,
+  resolveShortId,
+  getShortId,
+} from "../utils/eventIdStore.js";
 
 let pendingCalendarAction = null;
 
@@ -24,6 +30,28 @@ function isAffirmative(message) {
 
 function isNegative(message) {
   return /^(no|n|stop|cancel|never mind)\b/i.test(message.trim());
+}
+
+/**
+ * Resolves a user-supplied event identifier to a real Google event ID.
+ * Accepts a 6-digit short ID (e.g. "482193" or "[482193]") or a raw Google event ID.
+ * Returns null if a short ID was given but is not in the store.
+ */
+function resolveEventId(rawId) {
+  if (!rawId) return null;
+  const stripped = rawId.replace(/^\[|\]$/g, "");
+  if (/^\d{6}$/.test(stripped)) {
+    return resolveShortId(stripped);
+  }
+  return rawId;
+}
+
+/** Registers every event in a list and attaches its shortId field in-place. */
+function attachShortIds(events) {
+  return events.map((event) => ({
+    ...event,
+    shortId: registerEvent(event.eventId),
+  }));
 }
 
 async function handlePendingCalendarAction(message) {
@@ -52,10 +80,12 @@ async function handlePendingCalendarAction(message) {
   }
 
   if (pendingCalendarAction.type === "deleteEventConfirm") {
-    const { eventId, title } = pendingCalendarAction.payload;
+    const { eventId, title, shortId } = pendingCalendarAction.payload;
     await calendar.events.delete({ calendarId: "primary", eventId });
+    releaseEvent(eventId);
     pendingCalendarAction = null;
-    return `Deleted event "${title || eventId}".`;
+    const idDisplay = shortId ? ` [${shortId}]` : "";
+    return `Deleted event${idDisplay} "${title || eventId}".`;
   }
 
   if (pendingCalendarAction.type === "deleteCalendarConfirm") {
@@ -94,7 +124,7 @@ async function handleCalendarChat(message) {
   }
 
   if (intent.intent === "list_events") {
-    const events = await listUpcomingEventsForChat();
+    const events = attachShortIds(await listUpcomingEventsForChat());
     return { handled: true, reply: formatUpcomingEventsReply(events) };
   }
 
@@ -134,18 +164,26 @@ async function handleCalendarChat(message) {
       },
     });
     const event = normalizeEventResponse(response.data);
+    event.shortId = registerEvent(event.eventId);
     return { handled: true, reply: formatCreatedEventChatReply(event) };
   }
 
   if (intent.intent === "update_event") {
     if (!intent.eventId) {
-      const events = await listUpcomingEventsForChat();
+      const events = attachShortIds(await listUpcomingEventsForChat());
       const listText = events.length
         ? `\n${events.map(formatEventForChat).join("\n")}`
         : "";
       return {
         handled: true,
-        reply: `I need an eventId to update an event. Here are upcoming events:${listText}\nReply with eventId and fields to update.`,
+        reply: `I need an ID to update an event. Here are upcoming events:${listText}\nReply with the [ID] and fields to update.`,
+      };
+    }
+    const realId = resolveEventId(intent.eventId);
+    if (!realId) {
+      return {
+        handled: true,
+        reply: "That event ID wasn't recognized. List your events first to get valid IDs.",
       };
     }
     const updates = {};
@@ -162,25 +200,34 @@ async function handleCalendarChat(message) {
     }
     const response = await calendar.events.patch({
       calendarId: "primary",
-      eventId: intent.eventId,
+      eventId: realId,
       requestBody: updates,
     });
     const event = normalizeEventResponse(response.data);
+    const shortId = getShortId(realId);
+    const idDisplay = shortId ? ` [${shortId}]` : "";
     return {
       handled: true,
-      reply: `Updated event "${event.title}". eventId: ${event.eventId}`,
+      reply: `Updated event "${event.title}"${idDisplay}.`,
     };
   }
 
   if (intent.intent === "move_event") {
     if (!intent.eventId) {
-      const events = await listUpcomingEventsForChat();
+      const events = attachShortIds(await listUpcomingEventsForChat());
       const listText = events.length
         ? `\n${events.map(formatEventForChat).join("\n")}`
         : "";
       return {
         handled: true,
-        reply: `I need an eventId to reschedule an event. Here are upcoming events:${listText}\nReply with eventId, start, and end.`,
+        reply: `I need an ID to reschedule an event. Here are upcoming events:${listText}\nReply with the [ID], start, and end.`,
+      };
+    }
+    const realId = resolveEventId(intent.eventId);
+    if (!realId) {
+      return {
+        handled: true,
+        reply: "That event ID wasn't recognized. List your events first to get valid IDs.",
       };
     }
     if (!intent.start || !intent.end) {
@@ -191,42 +238,53 @@ async function handleCalendarChat(message) {
     }
     const response = await calendar.events.patch({
       calendarId: "primary",
-      eventId: intent.eventId,
+      eventId: realId,
       requestBody: {
         start: { dateTime: intent.start },
         end: { dateTime: intent.end },
       },
     });
     const event = normalizeEventResponse(response.data);
+    const shortId = getShortId(realId);
+    const idDisplay = shortId ? ` [${shortId}]` : "";
     return {
       handled: true,
-      reply: `Rescheduled event "${event.title}" to ${event.start}.`,
+      reply: `Rescheduled event "${event.title}"${idDisplay} to ${event.start}.`,
     };
   }
 
   if (intent.intent === "delete_event") {
     if (!intent.eventId) {
-      const events = await listUpcomingEventsForChat();
+      const events = attachShortIds(await listUpcomingEventsForChat());
       const listText = events.length
         ? `\n${events.map(formatEventForChat).join("\n")}`
         : "";
       return {
         handled: true,
-        reply: `I need an eventId before deleting an event. Here are upcoming events:${listText}`,
+        reply: `I need an ID before deleting an event. Here are upcoming events:${listText}`,
       };
     }
-    const event = await calendar.events.get({
+    const realId = resolveEventId(intent.eventId);
+    if (!realId) {
+      return {
+        handled: true,
+        reply: "That event ID wasn't recognized. List your events first to get valid IDs.",
+      };
+    }
+    const eventData = await calendar.events.get({
       calendarId: "primary",
-      eventId: intent.eventId,
+      eventId: realId,
     });
-    const eventTitle = event.data.summary || intent.eventId;
+    const eventTitle = eventData.data.summary || realId;
+    const shortId = getShortId(realId);
     pendingCalendarAction = {
       type: "deleteEventConfirm",
-      payload: { eventId: intent.eventId, title: eventTitle },
+      payload: { eventId: realId, title: eventTitle, shortId },
     };
+    const idDisplay = shortId ? `[${shortId}] ` : "";
     return {
       handled: true,
-      reply: `Please confirm deletion of event "${eventTitle}" (eventId: ${intent.eventId}). Reply with \`confirm\` to proceed or \`cancel\` to abort.`,
+      reply: `Please confirm deletion of event ${idDisplay}"${eventTitle}". Reply with \`confirm\` to proceed or \`cancel\` to abort.`,
     };
   }
 

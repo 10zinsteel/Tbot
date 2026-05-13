@@ -8,9 +8,11 @@ function ensureEndDateTime(start, end) {
   return new Date(startDate.getTime() + DEFAULT_EVENT_DURATION_MS).toISOString();
 }
 
+// Expects event.shortId to be set by the caller before formatting.
 function formatEventForChat(event) {
-  const start = event.start || "Unknown start";
-  return `- ${event.title || "(No title)"} | ${start} | eventId: ${event.eventId}`;
+  const when = formatEventStartForUser(event.start);
+  const id = event.shortId ? `[${event.shortId}]` : "";
+  return `${id} ${event.title || "(No title)"} | ${when}`;
 }
 
 function formatCalendarForChat(cal) {
@@ -30,25 +32,26 @@ function formatEventStartForUser(start) {
   });
 }
 
+// Expects event.shortId to be set by the caller before formatting.
 function formatCreatedEventChatReply(event) {
   const title = event.title || "Untitled event";
   const when = formatEventStartForUser(event.start);
-  const link = event.htmlLink;
-  const firstLine = `Created event '${title}' at ${when}.`;
-  if (link) {
-    return `${firstLine}\nOpen it here: ${link}`;
+  const idDisplay = event.shortId ? ` [${event.shortId}]` : "";
+  const firstLine = `Created event '${title}'${idDisplay} at ${when}.`;
+  if (event.htmlLink) {
+    return `${firstLine}\nOpen it here: ${event.htmlLink}`;
   }
   return firstLine;
 }
 
+// Expects each event to have event.shortId set by the caller before formatting.
 function formatUpcomingEventsReply(events) {
-  if (!events.length) {
-    return "You have no upcoming events.";
-  }
-  const lines = events.map((event, index) => {
+  if (!events.length) return "You have no upcoming events.";
+  const lines = events.map((event) => {
     const title = event.title || "Untitled event";
     const when = formatEventStartForUser(event.start);
-    return `${index + 1}. ${title} at ${when}`;
+    const id = event.shortId ? `[${event.shortId}]` : "";
+    return `${id} ${title} at ${when}`;
   });
   return `You have ${events.length} upcoming events:\n${lines.join("\n")}`;
 }
