@@ -40,7 +40,7 @@ function isNegative(message) {
 function resolveEventId(rawId) {
   if (!rawId) return null;
   const stripped = rawId.replace(/^\[|\]$/g, "");
-  if (/^\d{6}$/.test(stripped)) {
+  if (/^\d{4}$/.test(stripped)) {
     return resolveShortId(stripped);
   }
   return rawId;

@@ -36,7 +36,7 @@ Return this exact schema:
   "end": RFC3339 datetime or null,
   "location": string or null,
   "description": string or null,
-  "eventId": 6-digit short ID the user typed (e.g. "482193") or null,
+  "eventId": 4-digit short ID the user typed (e.g. "4821") or null,
   "calendarId": string or null,
   "summary": string or null,
   "timeZone": string or null

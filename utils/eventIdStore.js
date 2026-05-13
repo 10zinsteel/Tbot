@@ -7,7 +7,7 @@ const realToShort = new Map(); // googleEventId -> shortId
 function generateShortId() {
   let id;
   do {
-    id = String(Math.floor(100000 + Math.random() * 900000));
+    id = String(Math.floor(1000 + Math.random() * 9000));
   } while (shortToReal.has(id));
   return id;
 }
