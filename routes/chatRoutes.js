@@ -255,11 +255,6 @@ async function handleCalendarChat(message) {
       },
     });
 
-    console.log(
-      "[calendar] chat create events.insert full response:",
-      JSON.stringify(response.data, null, 2)
-    );
-
     const event = normalizeEventResponse(response.data);
     return {
       handled: true,

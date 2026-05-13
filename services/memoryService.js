@@ -23,7 +23,6 @@ function resetConversationHistory() {
 }
 
 export {
-  SYSTEM_MESSAGE,
   conversationHistory,
   trimConversationHistory,
   resetConversationHistory,

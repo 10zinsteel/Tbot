@@ -61,11 +61,6 @@ router.post("/api/calendar/events", ensureGoogleCalendarConnected, async (req, r
       },
     });
 
-    console.log(
-      "[calendar] API POST events.insert full response:",
-      JSON.stringify(response.data, null, 2)
-    );
-
     res.status(201).json({ event: normalizeEventResponse(response.data) });
   } catch (error) {
     console.error("[calendar] Failed to create event:", error);

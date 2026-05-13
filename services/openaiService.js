@@ -9,7 +9,7 @@ const client = process.env.OPENAI_API_KEY
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.2";
 
 async function getOpenAIChatReply(history) {
-  if (!client || !process.env.OPENAI_API_KEY) {
+  if (!client) {
     const err = new Error("Missing OPENAI_API_KEY");
     err.status = 500;
     throw err;

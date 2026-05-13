@@ -9,10 +9,6 @@ import calendarRoutes from "./routes/calendarRoutes.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, ".env") });
 
-// test
-// console.log(process.env.GOOGLE_CLIENT_ID);
-// console.log(process.env.GOOGLE_CLIENT_SECRET);
-
 const app = express();
 app.use(express.json());
 
@@ -34,7 +30,6 @@ export function startServer(port = DEFAULT_PORT) {
   return new Promise((resolve, reject) => {
     const httpServer = app.listen(port, () => {
       console.log(`TBot server running at http://localhost:${port}`);
-      console.log("[memory] short-term conversation memory initialized");
       resolve(httpServer);
     });
     httpServer.on("error", reject);
