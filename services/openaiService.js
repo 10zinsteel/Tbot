@@ -30,7 +30,7 @@ const CALENDAR_EXTRACTION_SYSTEM = `You extract calendar intent from user messag
 
 Return this exact schema:
 {
-  "intent": one of: "create_event" | "update_event" | "move_event" | "delete_event" | "list_events" | "list_calendars" | "create_calendar" | "update_calendar" | "delete_calendar" | "unknown",
+  "intent": one of: "create_event" | "update_event" | "delete_event" | "list_events" | "list_calendars" | "create_calendar" | "update_calendar" | "delete_calendar" | "unknown",
   "title": string or null,
   "start": RFC3339 datetime or null,
   "end": RFC3339 datetime or null,
@@ -45,10 +45,13 @@ Return this exact schema:
 Rules:
 - Resolve relative dates (today, tomorrow, next Friday) to RFC3339 using the provided current date/time and timezone.
 - RFC3339 format: YYYY-MM-DDTHH:mm:ss±HH:MM  (example: "2026-05-14T19:00:00-07:00")
+- Default timezone is America/Los_Angeles unless the user specifies otherwise or a different timezone is provided.
 - Use the provided timezone for all datetime values unless the user specifies a different one.
 - "title" is for event names. "summary" is for calendar names.
+- If the user wants to reschedule, move, or change the time of an event, use intent "update_event" with the new start/end values.
 - If no time is mentioned, set start to null.
 - For list_events and list_calendars intents, set all fields except intent to null.
+- If the user is unclear, return missing fields as null instead of guessing.
 - If the message is not a calendar request, return intent "unknown" with all other fields null.
 - Output ONLY the JSON object.`;
 

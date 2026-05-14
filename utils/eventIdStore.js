@@ -1,7 +1,7 @@
-// In-memory bidirectional mapping between 6-digit short IDs and real Google Calendar event IDs.
+// In-memory bidirectional mapping between 4-digit short IDs and real Google Calendar event IDs.
 // Short IDs are ephemeral — they reset when the server restarts.
 
-const shortToReal = new Map(); // shortId (string "NNNNNN") -> googleEventId
+const shortToReal = new Map(); // shortId (string "NNNN") -> googleEventId
 const realToShort = new Map(); // googleEventId -> shortId
 
 function generateShortId() {
@@ -37,7 +37,7 @@ function releaseEvent(googleEventId) {
 }
 
 /**
- * Resolves a 6-digit short ID to its real Google event ID.
+ * Resolves a 4-digit short ID to its real Google event ID.
  * Returns null if not found.
  */
 function resolveShortId(shortId) {
