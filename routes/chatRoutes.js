@@ -6,6 +6,7 @@ import {
   resetConversationHistory,
 } from "../services/memoryService.js";
 import { handleCalendarChat } from "../services/calendarChatService.js";
+import { handleCalendarMenuChat } from "../services/calendarMenuService.js";
 
 const router = express.Router();
 
@@ -30,6 +31,13 @@ router.post("/api/chat", async (req, res) => {
     console.log(
       `[memory] sending full history to OpenAI | turns (excluding system): ${conversationHistory.length - 1}`
     );
+
+    const menuResult = await handleCalendarMenuChat(message);
+    if (menuResult.handled) {
+      conversationHistory.push({ role: "assistant", content: menuResult.reply });
+      trimConversationHistory();
+      return res.json({ reply: menuResult.reply });
+    }
 
     const calendarResult = await handleCalendarChat(message);
     if (calendarResult.handled) {

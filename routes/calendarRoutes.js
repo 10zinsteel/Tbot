@@ -4,10 +4,21 @@ import {
   getCalendarClient,
   normalizeEventResponse,
   extractCalendarEventUpdate,
+  isGoogleCalendarConnected,
 } from "../services/googleCalendarService.js";
 import { CALENDAR_CHAT_TIME_ZONE } from "../utils/calendarParser.js";
+import { setCalendarMode } from "../services/calendarMenuService.js";
 
 const router = express.Router();
+
+router.get("/api/calendar/status", (req, res) => {
+  res.json({ connected: isGoogleCalendarConnected() });
+});
+
+router.post("/api/calendar/menu/start", (req, res) => {
+  setCalendarMode("calendar_menu");
+  res.json({ success: true });
+});
 
 router.get("/api/calendar/events", ensureGoogleCalendarConnected, async (req, res) => {
   try {

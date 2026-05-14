@@ -106,6 +106,10 @@ function isGoogleOAuthConfigured() {
   return !!googleOAuthClient;
 }
 
+function isGoogleCalendarConnected() {
+  return !!getCalendarClient();
+}
+
 export {
   getCalendarClient,
   ensureGoogleCalendarConnected,
@@ -116,4 +120,5 @@ export {
   getGoogleAuthUrl,
   handleGoogleOAuthCallback,
   isGoogleOAuthConfigured,
+  isGoogleCalendarConnected,
 };
