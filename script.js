@@ -1,6 +1,5 @@
 
 const chatWidget = document.getElementById("chatWidget");
-const connectGoogleButton = document.getElementById("connectGoogleButton");
 const newChatButton = document.getElementById("newChatButton");
 const chatForm = document.getElementById("chatForm");
 const chatInput = document.getElementById("chatInput");
@@ -16,26 +15,6 @@ function addMessage(text, sender) {
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-connectGoogleButton.addEventListener("click", async function () {
-  try {
-    const res = await fetch("/api/calendar/status");
-    const data = await res.json();
-
-    if (!data.connected) {
-      window.location.href = "/auth/google";
-      return;
-    }
-
-    addMessage(
-      "Calendar Menu:\n1. Create event\n2. Edit event\n3. Delete event\n4. List events\n\nReply with a number.",
-      "bot"
-    );
-    await fetch("/api/calendar/menu/start", { method: "POST" });
-  } catch (err) {
-    console.error(err);
-    addMessage("Could not reach the server. Is it running?", "bot");
-  }
-});
 newChatButton.addEventListener("click", async function () {
   newChatButton.disabled = true;
   sendButton.disabled = true;

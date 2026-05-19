@@ -1,0 +1,465 @@
+{
+  "name": "TBot Intent Router",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tbot-chat",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Receive from TBot",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [240, 304],
+      "webhookId": "4622fbc8-4ec5-47b7-9b81-30120f872db0",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "chatModel": "gpt-4o-mini",
+        "prompt": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Classify the user message into exactly one of: general_chat, calendar_create, calendar_list, calendar_update, calendar_delete, unknown. Reply with only the label, no punctuation, no explanation."
+            },
+            {
+              "content": "={{ $json.body.message }}"
+            }
+          ]
+        },
+        "options": { "maxTokens": 20, "temperature": 0 },
+        "requestOptions": {}
+      },
+      "id": "node-classify",
+      "name": "Classify Intent",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.1,
+      "position": [480, 304],
+      "credentials": {
+        "openAiApi": { "id": "REPLACE_WITH_YOUR_OPENAI_CREDENTIAL_ID", "name": "OpenAI account" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const intent = $input.first().json.message.content.trim().toLowerCase();\nconst message = $('Receive from TBot').first().json.body.message;\nreturn [{ json: { intent, message } }];"
+      },
+      "id": "node-extract",
+      "name": "Extract Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 304]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.intent }}", "rightValue": "general_chat", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "general_chat"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.intent }}", "rightValue": "calendar_create", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "calendar_create"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.intent }}", "rightValue": "calendar_list", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "calendar_list"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.intent }}", "rightValue": "calendar_update", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "calendar_update"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.intent }}", "rightValue": "calendar_delete", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "calendar_delete"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "id": "node-switch",
+      "name": "Route by Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [960, 304]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "chatModel": "gpt-4o-mini",
+        "prompt": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are TBot, a helpful personal assistant. Be concise, practical, and avoid unnecessary pleasantries. Focus on direct answers and actionable information."
+            },
+            { "content": "={{ $json.message }}" }
+          ]
+        },
+        "options": { "maxTokens": 500 },
+        "requestOptions": {}
+      },
+      "id": "node-chat-reply",
+      "name": "Get Chat Reply",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.1,
+      "position": [1200, 80],
+      "credentials": {
+        "openAiApi": { "id": "REPLACE_WITH_YOUR_OPENAI_CREDENTIAL_ID", "name": "OpenAI account" }
+      }
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify({reply: $json.message.content}) }}", "options": {} },
+      "id": "node-respond-general",
+      "name": "Respond General",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1440, 80]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify({reply: $json.reply}) }}", "options": {} },
+      "id": "node-respond-create",
+      "name": "Respond Calendar Create",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [2208, 288]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify({reply: $json.reply}) }}", "options": {} },
+      "id": "node-respond-list",
+      "name": "Respond Calendar List",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1680, 464]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify({reply: $json.reply}) }}", "options": {} },
+      "id": "node-respond-update",
+      "name": "Respond Calendar Update",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [2448, 640]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify({reply: $json.reply}) }}", "options": {} },
+      "id": "node-respond-delete",
+      "name": "Respond Calendar Delete",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [2448, 832]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "{\"reply\":\"I'm not sure what you mean. Could you rephrase that?\"}", "options": {} },
+      "id": "node-respond-unknown",
+      "name": "Respond Unknown",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1200, 1008]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": { "__rl": true, "value": "primary", "mode": "id" },
+        "limit": 10,
+        "options": {
+          "timeMin": "={{ $now.toISO() }}",
+          "timeMax": "={{ $now.plus({ days: 7 }).toISO() }}",
+          "orderBy": "startTime",
+          "singleEvents": true
+        }
+      },
+      "id": "gcal-list-events",
+      "name": "List Events",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [1200, 464],
+      "credentials": {
+        "googleCalendarOAuth2Api": { "id": "REPLACE_WITH_YOUR_GCAL_CREDENTIAL_ID", "name": "Google Calendar OAuth2 API" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const events = $input.all();\nif (events.length === 0) {\n  return [{ json: { reply: 'You have no upcoming events in the next 7 days.' } }];\n}\nconst lines = [];\nfor (const item of events) {\n  const e = item.json;\n  const start = e.start?.dateTime || e.start?.date || '';\n  let label = '';\n  if (start.includes('T')) {\n    const d = new Date(start);\n    label = d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });\n  } else if (start) {\n    label = new Date(start + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });\n  }\n  lines.push(`• ${e.summary || 'Untitled'}${label ? ' — ' + label : ''}`);\n}\nreturn [{ json: { reply: `Here are your upcoming events:\\n${lines.join('\\n')}` } }];"
+      },
+      "id": "gcal-format-list",
+      "name": "Format List Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 464]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "chatModel": "gpt-4o-mini",
+        "prompt": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "=Extract calendar event details from the user's message as a JSON object with these exact fields:\n- summary: event title (required)\n- startDateTime: ISO8601 datetime string (required, infer from context)\n- endDateTime: ISO8601 datetime string (default to startDateTime + 1 hour if not given)\n- location: string or null\n- description: string or null\n- timeZone: timezone string (default 'America/Los_Angeles')\n\nCurrent date and time: {{ $now.toISO() }}.\nReturn ONLY the raw JSON object, no markdown, no code blocks, no explanation."
+            },
+            { "content": "={{ $json.message }}" }
+          ]
+        },
+        "options": { "maxTokens": 250, "temperature": 0 },
+        "requestOptions": {}
+      },
+      "id": "oai-parse-create",
+      "name": "Parse Create Intent",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.1,
+      "position": [1200, 288],
+      "credentials": {
+        "openAiApi": { "id": "REPLACE_WITH_YOUR_OPENAI_CREDENTIAL_ID", "name": "OpenAI account" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiContent = $input.first().json.message.content;\nlet d;\ntry { d = JSON.parse(aiContent); }\ncatch { const m = aiContent.match(/\\{[\\s\\S]*\\}/); d = JSON.parse(m[0]); }\nreturn [{ json: {\n  summary: d.summary || 'New Event',\n  start: d.startDateTime,\n  end: d.endDateTime || null,\n  location: d.location || '',\n  description: d.description || '',\n  timeZone: d.timeZone || 'America/Los_Angeles'\n} }];"
+      },
+      "id": "code-build-event",
+      "name": "Build Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 288]
+    },
+    {
+      "parameters": {
+        "calendar": { "__rl": true, "value": "primary", "mode": "id" },
+        "start": "={{ $json.start }}",
+        "end": "={{ $json.end || $json.start }}",
+        "additionalFields": {
+          "summary": "={{ $json.summary }}",
+          "location": "={{ $json.location }}",
+          "description": "={{ $json.description }}"
+        }
+      },
+      "id": "gcal-create-event",
+      "name": "Create Calendar Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [1680, 288],
+      "credentials": {
+        "googleCalendarOAuth2Api": { "id": "REPLACE_WITH_YOUR_GCAL_CREDENTIAL_ID", "name": "Google Calendar OAuth2 API" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const event = $input.first().json;\nconst title = event.summary || 'Event';\nconst startStr = event.start?.dateTime || event.start?.date || '';\nlet label = '';\nif (startStr.includes('T')) {\n  label = new Date(startStr).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });\n} else if (startStr) {\n  label = new Date(startStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });\n}\nreturn [{ json: { reply: `Created: \"${title}\"${label ? ' on ' + label : ''}` } }];"
+      },
+      "id": "code-format-create",
+      "name": "Format Create Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 288]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "chatModel": "gpt-4o-mini",
+        "prompt": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "=Extract calendar update intent as a JSON object:\n- eventQuery: keywords to identify the event (required)\n- dateHint: approximate date ISO8601 or null\n- changes: object with only the fields to change (may include: summary, startDateTime, endDateTime, location, description)\n\nCurrent date: {{ $now.toFormat('yyyy-MM-dd') }}. Return ONLY raw JSON."
+            },
+            { "content": "={{ $json.message }}" }
+          ]
+        },
+        "options": { "maxTokens": 200, "temperature": 0 },
+        "requestOptions": {}
+      },
+      "id": "oai-parse-update",
+      "name": "Parse Update Intent",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.1,
+      "position": [1200, 640],
+      "credentials": {
+        "openAiApi": { "id": "REPLACE_WITH_YOUR_OPENAI_CREDENTIAL_ID", "name": "OpenAI account" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": { "__rl": true, "value": "primary", "mode": "id" },
+        "limit": 20,
+        "options": {
+          "timeMin": "={{ $now.toISO() }}",
+          "timeMax": "={{ $now.plus({ days: 14 }).toISO() }}",
+          "orderBy": "startTime",
+          "singleEvents": true
+        }
+      },
+      "id": "gcal-search-update",
+      "name": "Search Events for Update",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [1440, 640],
+      "credentials": {
+        "googleCalendarOAuth2Api": { "id": "REPLACE_WITH_YOUR_GCAL_CREDENTIAL_ID", "name": "Google Calendar OAuth2 API" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $('Parse Update Intent').first().json.message.content;\nlet intent;\ntry { intent = JSON.parse(raw); } catch { intent = JSON.parse(raw.match(/\\{[\\s\\S]*\\}/)[0]); }\nconst events = $input.all().map(i => i.json);\nconst q = (intent.eventQuery || '').toLowerCase();\nconst match = events.find(e => (e.summary || '').toLowerCase().includes(q));\nif (!match) {\n  return [{ json: { notFound: true, query: intent.eventQuery || 'event', eventId: 'not-found' } }];\n}\nconst ch = intent.changes || {};\nconst body = {};\nif (ch.summary) body.summary = ch.summary;\nif (ch.startDateTime) body.start = { dateTime: ch.startDateTime, timeZone: 'America/Los_Angeles' };\nif (ch.endDateTime) body.end = { dateTime: ch.endDateTime, timeZone: 'America/Los_Angeles' };\nif (ch.location) body.location = ch.location;\nif (ch.description) body.description = ch.description;\nreturn [{ json: { notFound: false, eventId: match.id, originalSummary: match.summary, patchBody: body } }];"
+      },
+      "id": "code-find-update",
+      "name": "Find and Prepare Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 640]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/10zinsteel%40gmail.com/events/' + $json.eventId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.patchBody) }}",
+        "options": {}
+      },
+      "id": "gcal-update-event",
+      "name": "Update Calendar Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1920, 640],
+      "credentials": {
+        "googleCalendarOAuth2Api": { "id": "REPLACE_WITH_YOUR_GCAL_CREDENTIAL_ID", "name": "Google Calendar OAuth2 API" }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('Find and Prepare Update').first().json;\nif (prep.notFound) {\n  return [{ json: { reply: `I couldn't find an event matching \"${prep.query}\" in your upcoming calendar.` } }];\n}\nconst result = $input.first().json;\nif (result.error || !result.id) {\n  return [{ json: { reply: `Found \"${prep.originalSummary}\" but couldn't update it. Please try again.` } }];\n}\nreturn [{ json: { reply: `Updated \"${result.summary || prep.originalSummary}\" successfully!` } }];"
+      },
+      "id": "code-format-update",
+      "name": "Format Update Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 640]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "chatModel": "gpt-4o-mini",
+        "prompt": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "=Extract calendar delete intent as a JSON object:\n- eventQuery: keywords to identify the event (required)\n- dateHint: approximate date ISO8601 or null\n\nCurrent date: {{ $now.toFormat('yyyy-MM-dd') }}. Return ONLY raw JSON."
+            },
+            { "content": "={{ $json.message }}" }
+          ]
+        },
+        "options": { "maxTokens": 100, "temperature": 0 },
+        "requestOptions": {}
+      },
+      "id": "oai-parse-delete",
+      "name": "Parse Delete Intent",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.1,
+      "position": [1200, 832],
+      "credentials": {
+        "openAiApi": { "id": "REPLACE_WITH_YOUR_OPENAI_CREDENTIAL_ID", "name": "OpenAI account" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": { "__rl": true, "value": "primary", "mode": "id" },
+        "limit": 20,
+        "options": {
+          "timeMin": "={{ $now.toISO() }}",
+          "timeMax": "={{ $now.plus({ days: 14 }).toISO() }}",
+          "orderBy": "startTime",
+          "singleEvents": true
+        }
+      },
+      "id": "gcal-search-delete",
+      "name": "Search Events for Delete",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [1440, 832],
+      "credentials": {
+        "googleCalendarOAuth2Api": { "id": "REPLACE_WITH_YOUR_GCAL_CREDENTIAL_ID", "name": "Google Calendar OAuth2 API" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $('Parse Delete Intent').first().json.message.content;\nlet intent;\ntry { intent = JSON.parse(raw); } catch { intent = JSON.parse(raw.match(/\\{[\\s\\S]*\\}/)[0]); }\nconst events = $input.all().map(i => i.json);\nconst q = (intent.eventQuery || '').toLowerCase();\nconst match = events.find(e => (e.summary || '').toLowerCase().includes(q));\nif (!match) {\n  return [{ json: { notFound: true, query: intent.eventQuery || 'event', eventId: 'not-found' } }];\n}\nreturn [{ json: { notFound: false, eventId: match.id, summary: match.summary } }];"
+      },
+      "id": "code-find-delete",
+      "name": "Find Event to Delete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 832]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/10zinsteel%40gmail.com/events/' + $json.eventId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {}
+      },
+      "id": "gcal-delete-event",
+      "name": "Delete Calendar Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1920, 832],
+      "credentials": {
+        "googleCalendarOAuth2Api": { "id": "REPLACE_WITH_YOUR_GCAL_CREDENTIAL_ID", "name": "Google Calendar OAuth2 API" }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('Find Event to Delete').first().json;\nif (prep.notFound) {\n  return [{ json: { reply: `I couldn't find an event matching \"${prep.query}\" in your upcoming calendar.` } }];\n}\nconst result = $input.first().json;\nif (result.error) {\n  return [{ json: { reply: `Found \"${prep.summary}\" but couldn't delete it. Please try again.` } }];\n}\nreturn [{ json: { reply: `Deleted \"${prep.summary}\" from your calendar.` } }];"
+      },
+      "id": "code-format-delete",
+      "name": "Format Delete Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 832]
+    }
+  ],
+  "connections": {
+    "Receive from TBot": { "main": [[{ "node": "Classify Intent", "type": "main", "index": 0 }]] },
+    "Classify Intent": { "main": [[{ "node": "Extract Intent", "type": "main", "index": 0 }]] },
+    "Extract Intent": { "main": [[{ "node": "Route by Intent", "type": "main", "index": 0 }]] },
+    "Route by Intent": {
+      "main": [
+        [{ "node": "Get Chat Reply", "type": "main", "index": 0 }],
+        [{ "node": "Parse Create Intent", "type": "main", "index": 0 }],
+        [{ "node": "List Events", "type": "main", "index": 0 }],
+        [{ "node": "Parse Update Intent", "type": "main", "index": 0 }],
+        [{ "node": "Parse Delete Intent", "type": "main", "index": 0 }],
+        [{ "node": "Respond Unknown", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Chat Reply": { "main": [[{ "node": "Respond General", "type": "main", "index": 0 }]] },
+    "List Events": { "main": [[{ "node": "Format List Reply", "type": "main", "index": 0 }]] },
+    "Format List Reply": { "main": [[{ "node": "Respond Calendar List", "type": "main", "index": 0 }]] },
+    "Parse Create Intent": { "main": [[{ "node": "Build Event", "type": "main", "index": 0 }]] },
+    "Build Event": { "main": [[{ "node": "Create Calendar Event", "type": "main", "index": 0 }]] },
+    "Create Calendar Event": { "main": [[{ "node": "Format Create Reply", "type": "main", "index": 0 }]] },
+    "Format Create Reply": { "main": [[{ "node": "Respond Calendar Create", "type": "main", "index": 0 }]] },
+    "Parse Update Intent": { "main": [[{ "node": "Search Events for Update", "type": "main", "index": 0 }]] },
+    "Search Events for Update": { "main": [[{ "node": "Find and Prepare Update", "type": "main", "index": 0 }]] },
+    "Find and Prepare Update": { "main": [[{ "node": "Update Calendar Event", "type": "main", "index": 0 }]] },
+    "Update Calendar Event": { "main": [[{ "node": "Format Update Reply", "type": "main", "index": 0 }]] },
+    "Format Update Reply": { "main": [[{ "node": "Respond Calendar Update", "type": "main", "index": 0 }]] },
+    "Parse Delete Intent": { "main": [[{ "node": "Search Events for Delete", "type": "main", "index": 0 }]] },
+    "Search Events for Delete": { "main": [[{ "node": "Find Event to Delete", "type": "main", "index": 0 }]] },
+    "Find Event to Delete": { "main": [[{ "node": "Delete Calendar Event", "type": "main", "index": 0 }]] },
+    "Delete Calendar Event": { "main": [[{ "node": "Format Delete Reply", "type": "main", "index": 0 }]] },
+    "Format Delete Reply": { "main": [[{ "node": "Respond Calendar Delete", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

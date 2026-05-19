@@ -3,8 +3,6 @@ import { fileURLToPath } from "url";
 import express from "express";
 import dotenv from "dotenv";
 import chatRoutes from "./routes/chatRoutes.js";
-import googleAuthRoutes from "./routes/googleAuthRoutes.js";
-import calendarRoutes from "./routes/calendarRoutes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, ".env") });
@@ -15,9 +13,7 @@ app.use(express.json());
 // Serve the TBot UI (HTML, CSS, JS) from the project root so /api/chat stays same-origin
 app.use(express.static(__dirname));
 
-app.use(googleAuthRoutes);
 app.use(chatRoutes);
-app.use(calendarRoutes);
 
 const DEFAULT_PORT = Number(process.env.PORT) || 3000;
 
