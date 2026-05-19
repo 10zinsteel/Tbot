@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "n8n-mcp": {
+      "command": "npx",
+      "args": ["n8n-mcp"],
+      "env": {
+        "MCP_MODE": "stdio",
+        "LOG_LEVEL": "error",
+        "DISABLE_CONSOLE_OUTPUT": "true",
+        "N8N_API_URL": "https://tenzinsteel.app.n8n.cloud",
+        "N8N_API_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMDI5MmRiNy0xNjRjLTQ3MDEtOWQxNy05MjczYjNmNjljOTMiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiOTRlZmRjNDItYmQ1My00Yjk2LTk1OTctZjQ4NDVhNTQ4ZTM3IiwiaWF0IjoxNzc4OTk4MDU2LCJleHAiOjE3ODE1MDY4MDB9.tQiBFtATHi8NI4mw_a554SZj7845UpQuLuyspevOVFA"
+      }
+    }
+  }
+}
